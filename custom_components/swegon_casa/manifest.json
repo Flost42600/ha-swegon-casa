@@ -1,0 +1,15 @@
+{
+  "domain": "swegon_casa",
+  "name": "Swegon CASA",
+  "after_dependencies": ["frontend"],
+  "codeowners": [],
+  "config_flow": true,
+  "dependencies": ["http"],
+  "documentation": "https://github.com/OWNER/ha-swegon-casa",
+  "integration_type": "device",
+  "iot_class": "local_polling",
+  "issue_tracker": "https://github.com/OWNER/ha-swegon-casa/issues",
+  "loggers": ["pymodbus"],
+  "requirements": ["pymodbus>=3.8.0", "pyserial>=3.5"],
+  "version": "0.1.0"
+}
