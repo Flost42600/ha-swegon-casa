@@ -27,7 +27,7 @@ Consultez la notice Swegon de votre carte SEM / SEC pour l'emplacement exact des
 
 ## Installation
 
-**HACS (recommandé)** : HACS > menu ⋮ > Dépôts personnalisés > `https://github.com/OWNER/ha-swegon-casa`, type « Intégration ». Installez « Swegon CASA », puis redémarrez Home Assistant.
+**HACS (recommandé)** : HACS > menu ⋮ > Dépôts personnalisés > `https://github.com/Flost42600/ha-swegon-casa`, type « Intégration ». Installez « Swegon CASA », puis redémarrez Home Assistant.
 
 **Manuelle** : copiez `custom_components/swegon_casa` dans le dossier `config/custom_components/`, puis redémarrez.
 
