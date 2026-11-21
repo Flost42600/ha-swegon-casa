@@ -11,7 +11,7 @@
       },
       "serial": {
         "title": "Adaptateur USB RS-485",
-        "description": "Réglages Swegon par défaut : 38 400 bauds, sans parité, 1 bit de stop. Laissez l'adresse esclave à 0 pour la détecter.",
+        "description": "Choisissez l'adaptateur USB RS-485 (pas ttyS0, le port intégré). La vitesse et l'adresse esclave sont détectées : si la centrale ne répond pas à la vitesse choisie, les autres vitesses usuelles sont essayées. La recherche dure jusqu'à 15 secondes environ.",
         "data": {
           "serial_port": "Port série",
           "baudrate": "Vitesse (bauds)",
@@ -38,7 +38,9 @@
       }
     },
     "error": {
-      "cannot_connect": "La centrale ne répond pas : vérifiez le port, le câblage (A/B), le cavalier de terminaison et la vitesse.",
+      "cannot_connect": "La centrale ne répond pas (toutes les vitesses et adresses usuelles ont été essayées) : vérifiez le câblage (inversez A et B), le cavalier de terminaison, et qu'aucune autre intégration n'utilise ce port.",
+      "no_answer_builtin_port": "Rien ne répond sur ce port. C'est le port série intégré à l'ordinateur, pas l'adaptateur USB RS-485 : choisissez plutôt l'adaptateur (en général /dev/serial/by-id/usb-… ou /dev/ttyUSB0). S'il n'est pas dans la liste, vérifiez Paramètres > Système > Matériel.",
+      "port_unavailable": "Impossible d'ouvrir ce port : il n'existe pas, l'adaptateur est débranché, ou une autre intégration (Modbus en YAML par exemple) l'utilise déjà.",
       "unknown": "Erreur inattendue, voir les journaux."
     },
     "abort": {

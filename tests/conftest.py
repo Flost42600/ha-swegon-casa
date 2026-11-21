@@ -22,7 +22,7 @@ def fake_bus(unit: Unit):
     clients: list[FakeClient] = []
 
     def make(self):
-        client = FakeClient(unit)
+        client = FakeClient(unit, self.transport.baudrate)
         clients.append(client)
         return client
 

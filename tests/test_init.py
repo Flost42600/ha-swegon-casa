@@ -229,3 +229,33 @@ async def test_rotor_entities_only_on_r_series(hass: HomeAssistant, fake_bus, un
     unit.input.update(ascii_registers(6008, "CASA R5", 15))
     await setup(hass)
     assert state(hass, "binary_sensor.swegon_casa_w3_rotor_active") == "on"
+
+
+async def _serial_flow(hass: HomeAssistant, port: str, baudrate: int = 38400):
+    result = await hass.config_entries.flow.async_init(DOMAIN, context={"source": config_entries.SOURCE_USER})
+    result = await hass.config_entries.flow.async_configure(result["flow_id"], {"next_step_id": "serial"})
+    return await hass.config_entries.flow.async_configure(
+        result["flow_id"],
+        {CONF_SERIAL_PORT: port, CONF_BAUDRATE: baudrate, CONF_PARITY: "N", CONF_STOPBITS: 1, CONF_SLAVE: 0},
+    )
+
+
+async def test_flow_builtin_port_gets_a_clear_message(hass: HomeAssistant, fake_bus, unit):
+    unit.slave = 99  # nothing on the built-in port
+    result = await _serial_flow(hass, "/dev/ttyS0")
+    assert result["errors"] == {"base": "no_answer_builtin_port"}
+
+
+async def test_flow_port_that_cannot_open(hass: HomeAssistant, fake_bus, unit):
+    unit.port_ok = False
+    result = await _serial_flow(hass, "/dev/ttyUSB7")
+    assert result["errors"] == {"base": "port_unavailable"}
+
+
+async def test_flow_saves_the_detected_speed(hass: HomeAssistant, fake_bus, unit):
+    unit.baudrate = 19200
+    result = await _serial_flow(hass, PORT)
+    assert result["step_id"] == "features"
+    result = await hass.config_entries.flow.async_configure(result["flow_id"], {OPT_FEATURES: []})
+    assert result["data"][CONF_BAUDRATE] == 19200
+    await hass.async_block_till_done()

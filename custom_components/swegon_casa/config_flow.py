@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import logging
+import os
+import re
 from typing import Any
 
 import voluptuous as vol
@@ -44,7 +46,7 @@ from .const import (
     OPT_SCAN_INTERVAL,
     OPT_SETTINGS_INTERVAL,
 )
-from .modbus import SwegonModbus, SwegonModbusError, Transport, detect
+from .modbus import SwegonModbus, SwegonModbusError, SwegonPortError, Transport, detect
 from .registers import FEATURES, MODEL_NAME, SERIAL_NUMBER, by_key, from_raw
 
 _LOGGER = logging.getLogger(__name__)
@@ -64,27 +66,32 @@ def transport_from(data: dict[str, Any]) -> Transport:
     return Transport(kind="tcp", host=data[CONF_HOST], tcp_port=int(data.get(CONF_TCP_PORT, DEFAULT_TCP_PORT)))
 
 
+BUILTIN_PORT = re.compile(r"^/dev/tty(S|AMA)\d+$")  # motherboard / Raspberry Pi UART, not a USB adapter
+
+
 def _list_serial_ports() -> list[SelectOptionDict]:
-    """Serial ports, by-id paths first since they survive reboots."""
+    """Serial ports: USB adapters first (by-id paths survive reboots), built-in UARTs last."""
     from serial.tools import list_ports
 
-    options: list[SelectOptionDict] = []
-    for port in list_ports.comports():
-        path = port.device
-        try:
-            import os
+    by_id = "/dev/serial/by-id"
+    aliases: dict[str, str] = {}
+    try:
+        if os.path.isdir(by_id):
+            for name in os.listdir(by_id):
+                aliases[os.path.realpath(os.path.join(by_id, name))] = os.path.join(by_id, name)
+    except OSError:
+        pass
 
-            by_id = "/dev/serial/by-id"
-            if os.path.isdir(by_id):
-                for name in os.listdir(by_id):
-                    if os.path.realpath(os.path.join(by_id, name)) == os.path.realpath(path):
-                        path = os.path.join(by_id, name)
-                        break
-        except OSError:
-            pass
-        label = f"{path} — {port.description}" if port.description and port.description != "n/a" else path
-        options.append(SelectOptionDict(value=path, label=label))
-    return options
+    usb: list[SelectOptionDict] = []
+    builtin: list[SelectOptionDict] = []
+    for port in list_ports.comports():
+        path = aliases.get(os.path.realpath(port.device), port.device)
+        if BUILTIN_PORT.match(port.device) and port.vid is None:
+            builtin.append(SelectOptionDict(value=path, label=f"{path} — port série intégré / built-in serial port"))
+            continue
+        details = " ".join(x for x in (port.manufacturer, port.product or port.description) if x and x != "n/a")
+        usb.append(SelectOptionDict(value=path, label=f"{path} — {details}" if details else path))
+    return usb + builtin
 
 
 class SwegonConfigFlow(ConfigFlow, domain=DOMAIN):
@@ -159,13 +166,19 @@ class SwegonConfigFlow(ConfigFlow, domain=DOMAIN):
         wanted = int(data.get(CONF_SLAVE, AUTO))
         slaves = (wanted,) if wanted else (1, 16)
         try:
-            slave, offset, firmware = await detect(transport, slaves=slaves)
+            slave, offset, firmware, baudrate = await detect(transport, slaves=slaves)
+        except SwegonPortError as err:
+            _LOGGER.info("Swegon CASA port unavailable: %s", err)
+            return {"base": "port_unavailable"}
         except SwegonModbusError as err:
             _LOGGER.info("Swegon CASA not found: %s", err)
+            if data[CONF_KIND] == "serial" and BUILTIN_PORT.match(os.path.realpath(data[CONF_SERIAL_PORT])):
+                return {"base": "no_answer_builtin_port"}
             return {"base": "cannot_connect"}
         except Exception:  # noqa: BLE001
             _LOGGER.exception("Unexpected error while looking for the unit")
             return {"base": "unknown"}
+        transport.baudrate = baudrate
         client = SwegonModbus(transport, slave, offset)
         try:
             model = await client.read_text(*MODEL_NAME)
@@ -176,6 +189,8 @@ class SwegonConfigFlow(ConfigFlow, domain=DOMAIN):
         finally:
             await client.close()
         self._data = {**data, CONF_SLAVE: slave, CONF_OFFSET: offset}
+        if data[CONF_KIND] == "serial":
+            self._data[CONF_BAUDRATE] = baudrate
         self._title = f"Swegon {model}" if model else "Swegon CASA"
         _LOGGER.info("Found %s (firmware %s) at slave %s, offset %s", self._title, firmware, slave, offset)
         return {}

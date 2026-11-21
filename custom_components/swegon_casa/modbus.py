@@ -13,7 +13,7 @@ from __future__ import annotations
 import asyncio
 import inspect
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any, Literal
 
 from pymodbus.client import AsyncModbusSerialClient, AsyncModbusTcpClient
@@ -32,6 +32,10 @@ class SwegonModbusError(Exception):
     """The unit did not answer (cable, port, settings)."""
 
 
+class SwegonPortError(SwegonModbusError):
+    """The serial port or gateway cannot be opened (wrong path, busy, unplugged)."""
+
+
 class SwegonWriteError(Exception):
     """The unit refused or did not confirm a write."""
 
@@ -47,6 +51,7 @@ class Transport:
     host: str | None = None
     tcp_port: int = 502
     timeout: float = 2.0
+    retries: int = 1
 
 
 def plan_blocks(numbers: list[int]) -> list[tuple[int, int]]:
@@ -88,9 +93,9 @@ class SwegonModbus:
                 stopbits=t.stopbits,
                 bytesize=t.bytesize,
                 timeout=t.timeout,
-                retries=1,
+                retries=t.retries,
             )
-        return AsyncModbusTcpClient(host=t.host, port=t.tcp_port, timeout=t.timeout, retries=1)
+        return AsyncModbusTcpClient(host=t.host, port=t.tcp_port, timeout=t.timeout, retries=t.retries)
 
     async def connect(self) -> None:
         if self._client is not None and self._client.connected:
@@ -98,8 +103,14 @@ class SwegonModbus:
         self._client = self._make_client()
         params = inspect.signature(self._client.read_input_registers).parameters
         self._id_kw = "device_id" if "device_id" in params else "slave"
-        if not await self._client.connect():
-            raise SwegonModbusError(f"Cannot open {self._where()}")
+        try:
+            opened = await self._client.connect()
+        except OSError as err:
+            opened = False
+            _LOGGER.debug("Opening %s failed: %s", self._where(), err)
+        if not opened:
+            self._client = None
+            raise SwegonPortError(f"Cannot open {self._where()}")
 
     async def close(self) -> None:
         if self._client is not None:
@@ -196,24 +207,42 @@ class SwegonModbus:
                 raise SwegonWriteError(f"Register {number} reads {back} after writing {raw}")
 
 
+BAUDRATES = (38400, 19200, 9600, 57600, 115200)
+PROBE_TIMEOUT = 0.8  # seconds per request while searching: an idle bus answers nothing
+
+
 async def detect(
-    transport: Transport, slaves: tuple[int, ...] = (1, 16), offsets: tuple[int, ...] = (-1, 0)
-) -> tuple[int, int, tuple[int, int, int]]:
-    """Find (slave, offset, firmware) by reading the firmware version registers."""
-    last_error: Exception | None = None
-    for slave in slaves:
-        for offset in offsets:
-            client = SwegonModbus(transport, slave, offset)
-            try:
-                values = await client.read("input", list(FIRMWARE))
-            except SwegonModbusError as err:
-                last_error = err
-                continue
-            finally:
-                await client.close()
-            major, minor, build = (values.get(n) for n in FIRMWARE)
-            if major is not None and 1 <= major <= 9 and minor is not None and minor <= 99 and (build or 0) <= 999:
-                return slave, offset, (major, minor, build or 0)
-    if last_error is not None:
-        raise last_error
-    raise SwegonModbusError("The unit answered but no Swegon firmware version was found")
+    transport: Transport,
+    slaves: tuple[int, ...] = (1, 16),
+    offsets: tuple[int, ...] = (-1, 0),
+    baudrates: tuple[int, ...] | None = None,
+) -> tuple[int, int, tuple[int, int, int], int]:
+    """Find (slave, offset, firmware, baudrate) by reading the firmware version registers.
+
+    Searching is quick: short timeout, no retry, and a slave that stays silent
+    is not asked again with another offset. On a serial link the chosen speed
+    is tried first, then the other usual speeds. A port that cannot be opened
+    stops the search at once (SwegonPortError).
+    """
+    if baudrates is None:
+        baudrates = (transport.baudrate,)
+        if transport.kind == "serial":
+            baudrates += tuple(b for b in BAUDRATES if b != transport.baudrate)
+    for baudrate in baudrates:
+        probe = replace(transport, baudrate=baudrate, timeout=min(transport.timeout, PROBE_TIMEOUT), retries=0)
+        for slave in slaves:
+            for offset in offsets:
+                client = SwegonModbus(probe, slave, offset)
+                try:
+                    values = await client.read("input", list(FIRMWARE))
+                except SwegonPortError:
+                    raise
+                except SwegonModbusError:
+                    break  # silent: no use trying another offset for this slave
+                finally:
+                    await client.close()
+                major, minor, build = (values.get(n) for n in FIRMWARE)
+                if major is not None and 1 <= major <= 9 and minor is not None and minor <= 99 and (build or 0) <= 999:
+                    _LOGGER.info("Swegon unit found at %s baud, slave %s, offset %s", baudrate, slave, offset)
+                    return slave, offset, (major, minor, build or 0), baudrate
+    raise SwegonModbusError(f"No Swegon unit answers on {SwegonModbus(transport)._where()}")

@@ -11,7 +11,7 @@
       },
       "serial": {
         "title": "USB RS-485 adapter",
-        "description": "Default Swegon settings: 38400 baud, no parity, 1 stop bit. Leave the slave address at 0 to detect it.",
+        "description": "Choose the USB RS-485 adapter (not ttyS0, the built-in port). Speed and slave address are detected: if the unit does not answer at the chosen speed, the other usual speeds are tried. The search takes up to about 15 seconds.",
         "data": {
           "serial_port": "Serial port",
           "baudrate": "Baud rate",
@@ -38,7 +38,9 @@
       }
     },
     "error": {
-      "cannot_connect": "The unit does not answer: check the port, the wiring (A/B), the termination jumper and the speed.",
+      "cannot_connect": "The unit does not answer (all usual speeds and addresses were tried): check the wiring (swap A and B), the termination jumper, and that no other integration uses this port.",
+      "no_answer_builtin_port": "Nothing answers on this port. It is the computer's built-in serial port, not a USB RS-485 adapter: choose the adapter instead (usually /dev/serial/by-id/usb-… or /dev/ttyUSB0). If it is not in the list, check Settings > System > Hardware.",
+      "port_unavailable": "This port cannot be opened: it does not exist, the adapter is unplugged, or another integration (Modbus YAML for example) already uses it.",
       "unknown": "Unexpected error, see the logs."
     },
     "abort": {

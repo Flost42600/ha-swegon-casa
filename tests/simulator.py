@@ -17,6 +17,8 @@ def ascii_registers(first: int, text: str, length: int) -> dict[int, int]:
 class Unit:
     def __init__(self, firmware=(3, 1, 12), slave: int = 1) -> None:
         self.slave = slave
+        self.baudrate = 38400
+        self.port_ok = True
         self.writes: list[tuple[int, int]] = []
         self.input: dict[int, int] = {
             6001: firmware[0], 6002: firmware[1], 6003: firmware[2], 6004: 1, 6005: 2,
@@ -71,22 +73,27 @@ class Result:
 class FakeClient:
     """Stands in for AsyncModbusSerialClient / AsyncModbusTcpClient."""
 
-    def __init__(self, unit: Unit) -> None:
+    def __init__(self, unit: Unit, baudrate: int = 38400) -> None:
         self.unit = unit
+        self.baudrate = baudrate
         self.connected = False
         self.requests = 0
 
     async def connect(self) -> bool:
-        self.connected = True
-        return True
+        self.connected = self.unit.port_ok
+        return self.connected
+
+    def _check(self, device_id: int) -> None:
+        # Wrong address or wrong speed: nothing (readable) comes back, as on a real bus.
+        if device_id != self.unit.slave or self.baudrate != self.unit.baudrate:
+            raise ModbusIOException("no response")
 
     def close(self) -> None:
         self.connected = False
 
     def _read(self, table: dict[int, int], address: int, count: int, device_id: int) -> Result:
         self.requests += 1
-        if device_id != self.unit.slave:
-            raise ModbusIOException("no response")
+        self._check(device_id)
         values = []
         for number in range(address + 1, address + 1 + count):
             if number not in table:
@@ -101,8 +108,7 @@ class FakeClient:
         return self._read(self.unit.holding, address, count, device_id)
 
     async def write_register(self, address: int, value: int, *, device_id: int = 1, **_) -> Result:
-        if device_id != self.unit.slave:
-            raise ModbusIOException("no response")
+        self._check(device_id)
         number = address + 1
         if number not in self.unit.holding:
             return Result(code=2)

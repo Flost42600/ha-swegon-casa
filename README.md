@@ -110,6 +110,7 @@ Valeurs du mode : `stopped`, `away`, `home`, `boost`, `travelling`.
 
 ## Dépannage
 
+- **`/dev/ttyS0` ne répond pas** : c'est le port série intégré au PC, pas l'adaptateur USB. Choisissez l'adaptateur, en général `/dev/serial/by-id/usb-…` ou `/dev/ttyUSB0` (liste complète : Paramètres > Système > Matériel > Tout le matériel, filtre « tty »).
 - **« La centrale ne répond pas »** : vérifiez le port, l'inversion A/B, le cavalier JP1, la vitesse (38 400) et que rien d'autre n'utilise le port.
 - **Valeurs décalées** (le CO2 affiche l'humidité, par exemple) : la documentation Swegon numérote les registres à partir de 1. L'intégration détecte ce décalage ; les diagnostics indiquent celui qui a été retenu (`offset`).
 - **Diagnostics** : page de l'intégration > ⋮ > Télécharger les diagnostics. Toutes les valeurs brutes y figurent ; le numéro de série est masqué.

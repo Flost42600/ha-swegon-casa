@@ -7,6 +7,7 @@ import pytest
 from custom_components.swegon_casa.modbus import (
     SwegonModbus,
     SwegonModbusError,
+    SwegonPortError,
     SwegonWriteError,
     Transport,
     detect,
@@ -47,7 +48,7 @@ def test_every_register_is_consistent():
 
 async def test_detect_finds_slave_and_offset(fake_bus, unit):
     unit.slave = 16
-    assert await detect(SERIAL) == (16, -1, (3, 1, 12))
+    assert await detect(SERIAL) == (16, -1, (3, 1, 12), 38400)
 
 
 async def test_detect_fails_cleanly_when_nothing_answers(fake_bus, unit):
@@ -96,3 +97,23 @@ async def test_write_refused_raises(fake_bus, unit):
     client = SwegonModbus(SERIAL, 1, -1)
     with pytest.raises(SwegonWriteError):
         await client.write(5999, 1)
+
+
+async def test_detect_finds_another_speed(fake_bus, unit):
+    unit.baudrate = 9600
+    assert await detect(SERIAL) == (1, -1, (3, 1, 12), 9600)
+
+
+async def test_detect_skips_offsets_of_a_silent_slave(fake_bus, unit):
+    unit.slave = 99
+    with pytest.raises(SwegonModbusError):
+        await detect(SERIAL)
+    # 5 speeds x 2 slaves, one request each: the second offset is never tried
+    assert sum(c.requests for c in fake_bus) == 10
+
+
+async def test_detect_stops_when_the_port_cannot_be_opened(fake_bus, unit):
+    unit.port_ok = False
+    with pytest.raises(SwegonPortError):
+        await detect(SERIAL)
+    assert len(fake_bus) == 1
