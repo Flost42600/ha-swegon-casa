@@ -50,7 +50,7 @@ type: custom:swegon-casa-card        # ou custom:swegon-casa-mini-card
 
 Ce que montre le schéma :
 
-- **Échangeur à plaques à flux croisés** : l'air neuf (haut gauche → bas droite) et l'air extrait (haut droite → bas gauche) traversent le bloc de plaques en deux faisceaux lumineux qui se croisent au centre, colorés de leur température d'entrée à leur température de sortie. Des traînées lumineuses avancent à la vitesse des ventilateurs. Givre et flocons pendant le dégivrage. Les centrales de la série R affichent une roue qui tourne à sa vitesse réelle.
+- **Échangeur à plaques à flux croisés** : l'air neuf (haut gauche → bas droite) et l'air extrait (haut droite → bas gauche) traversent le bloc de plaques et se croisent au centre. Chaque gaine est colorée de sa température d'entrée à sa température de sortie, et l'air s'anime à la vitesse des ventilateurs. Givre et flocons pendant le dégivrage. Les centrales de la série R affichent une roue qui tourne à sa vitesse réelle.
 - **By-pass** : le volet pivote selon l'ouverture en %, le canal de contournement s'allume et les canaux d'air neuf de l'échangeur s'estompent d'autant.
 - **Batteries** de préchauffe et de post-chauffe, qui rougeoient selon leur puissance (bleu en rafraîchissement), **filtres** (orange quand ils sont à remplacer), **ventilateurs** avec commande en % et vitesse, températures des quatre flux et de l'ambiance.
 - **Modes** Arrêt / Absent / Maison / Boost / Voyage et bouton Cheminée, **alertes** avec bouton « Acquitter » pour le filtre et l'entretien, **tuiles** : rendement, débits en m³/h, ventilateurs, CO₂, humidité, COV, heures avant entretien.
