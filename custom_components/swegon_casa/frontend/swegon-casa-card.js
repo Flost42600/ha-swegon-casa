@@ -14,7 +14,7 @@
  */
 
 const DOMAIN = "swegon_casa";
-const CARD_VERSION = "0.2.0";
+const CARD_VERSION = "0.2.1";
 
 /* ------------------------------------------------------------------------------------------ */
 /*  Entities: card key -> [domain, translation keys by preference]                            */
@@ -175,30 +175,73 @@ function esc(v) {
 /* ------------------------------------------------------------------------------------------ */
 const CX = 620, CY = 330, HS = 92; // exchanger centre, half side of the plate stack (local frame)
 
-function plateChannels() {
-  // Local frame: rotate(45) makes +x point down-right (fresh -> supply) and +y down-left (extract -> exhaust).
-  // Every other crossing shows the extract channel on top, so the two streams look woven like real plates.
-  const ks = [];
-  for (let i = 0; i < 9; i++) ks.push(-80 + i * 20);
-  let ext = "", fresh = "", weave = "";
-  ks.forEach((k, i) => {
-    ext += `<path d="M${k} ${-HS} V${HS}"/>`;
-    fresh += `<path d="M${-HS} ${k} H${HS}"/>`;
-    ks.forEach((k2, j) => { if ((i + j) % 2 === 0) weave += `<rect x="${k - 10}" y="${k2 - 10}" width="20" height="20"/>`; });
-  });
-  return { ext, fresh, weave };
-}
-
-function plenum(id, pts) {
-  return `<polygon id="${id}" class="plenum" points="${pts}"/>`;
+/*
+ * Cross-flow plate exchanger, drawn in a frame rotated by 45 degrees: local +x runs from the
+ * top-left face to the bottom-right face (fresh -> supply), local +y from the top-right face to
+ * the bottom-left face (extract -> exhaust). A brushed-metal plate stack carries two soft
+ * light ribbons, one per air stream, coloured from inlet to outlet temperature; they cross in
+ * the middle, where a glow breathes while heat is exchanged. Flared collars join the ducts.
+ */
+function exchanger(o) {
+  const { hs, band, lanes, flare, hc, hb, frost = "", bolts = true } = o;
+  const b = band / 2, f = flare;
+  let plates = "";
+  for (let c = -2 * hs + 12, i = 0; c < 2 * hs; c += 12, i++) {
+    plates += `<path class="${i % 2 ? "pl2" : "pl1"}" d="M${c + hs} ${-hs} L${c - hs} ${hs}"/>`;
+  }
+  // Light streaks sliding along each ribbon (CSS translate runs in the rotated frame, i.e. along the diagonal).
+  const sl = Math.max(8, band * 0.3), lanesY = lanes.length > 1 ? lanes : [0];
+  const streaks = lanesY.flatMap((y, li) => [0, 1].map((k) =>
+    `<path d="M${-sl} ${y} H0" style="--i:${(li * 0.37 + k * 0.5) % 1}"/>`)).join("");
+  const dotsF = streaks;
+  const dotsE = `<g transform="rotate(90)">${streaks}</g>`;
+  const lip = (w) => `M${-hs - f} ${-w} C${-hs - f * 0.45} ${-w} ${-hs - f * 0.35} ${-b - (w - hc)} ${-hs} ${-b - (w - hc)} V${b + (w - hc)} C${-hs - f * 0.35} ${b + (w - hc)} ${-hs - f * 0.45} ${w} ${-hs - f} ${w} Z`;
+  const collar = (id, rot, n) => `<g transform="rotate(${rot})"><path class="clb" d="${lip(hb)}"/><path id="${id}" class="cl" d="${lip(hc)}" fill="url(#gCl${n})"/></g>`;
+  const boltXY = hs - 9;
+  return {
+    defs: `
+    <linearGradient id="gFresh" gradientUnits="userSpaceOnUse" x1="${-hs}" y1="0" x2="${hs}" y2="0"><stop id="gf0" offset="0" stop-color="#64b5f6"/><stop id="gf1" offset="1" stop-color="#ffa36b"/></linearGradient>
+    <linearGradient id="gExt" gradientUnits="userSpaceOnUse" x1="0" y1="${-hs}" x2="0" y2="${hs}"><stop id="ge0" offset="0" stop-color="#ffa36b"/><stop id="ge1" offset="1" stop-color="#64b5f6"/></linearGradient>
+    <linearGradient id="gFthY" gradientUnits="userSpaceOnUse" x1="0" y1="${-b}" x2="0" y2="${b}"><stop offset="0" stop-color="#000"/><stop offset=".16" stop-color="#fff"/><stop offset=".84" stop-color="#fff"/><stop offset="1" stop-color="#000"/></linearGradient>
+    <linearGradient id="gFthX" gradientUnits="userSpaceOnUse" x1="${-b}" y1="0" x2="${b}" y2="0"><stop offset="0" stop-color="#000"/><stop offset=".16" stop-color="#fff"/><stop offset=".84" stop-color="#fff"/><stop offset="1" stop-color="#000"/></linearGradient>
+    <mask id="mRibF" maskUnits="userSpaceOnUse" x="${-hs}" y="${-hs}" width="${hs * 2}" height="${hs * 2}"><rect x="${-hs}" y="${-b}" width="${hs * 2}" height="${band}" fill="url(#gFthY)"/></mask>
+    <mask id="mRibE" maskUnits="userSpaceOnUse" x="${-hs}" y="${-hs}" width="${hs * 2}" height="${hs * 2}"><rect x="${-b}" y="${-hs}" width="${band}" height="${hs * 2}" fill="url(#gFthX)"/></mask>
+    <linearGradient id="gBevel" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#e3e8ee"/><stop offset=".5" stop-color="#8a96a3"/><stop offset="1" stop-color="#4b5462"/></linearGradient>
+    <linearGradient id="gMetal" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#3a424d"/><stop offset=".5" stop-color="#252b33"/><stop offset="1" stop-color="#1b2027"/></linearGradient>
+    <radialGradient id="gGlow"><stop offset="0" stop-color="#fff" stop-opacity=".55"/><stop offset=".45" style="stop-color:var(--glow,#fff)" stop-opacity=".45"/><stop offset="1" style="stop-color:var(--glow,#fff)" stop-opacity="0"/></radialGradient>
+    <linearGradient id="gStreak" gradientUnits="userSpaceOnUse" x1="${-sl}" y1="0" x2="0" y2="0"><stop offset="0" stop-color="#fff" stop-opacity="0"/><stop offset="1" stop-color="#fff" stop-opacity=".95"/></linearGradient>
+    <clipPath id="cHx"><rect x="${-hs}" y="${-hs}" width="${hs * 2}" height="${hs * 2}" rx="${hs * 0.08}"/></clipPath>
+    <linearGradient id="gCl0" gradientUnits="userSpaceOnUse" x1="${-hs - f}" y1="0" x2="${-hs}" y2="0"><stop offset="0" stop-opacity="1"/><stop offset=".55" stop-opacity=".95"/><stop offset="1" stop-opacity=".6"/></linearGradient>
+    <linearGradient id="gCl1" gradientUnits="userSpaceOnUse" x1="${-hs - f}" y1="0" x2="${-hs}" y2="0"><stop offset="0" stop-opacity="1"/><stop offset=".55" stop-opacity=".95"/><stop offset="1" stop-opacity=".6"/></linearGradient>
+    <linearGradient id="gCl2" gradientUnits="userSpaceOnUse" x1="${-hs - f}" y1="0" x2="${-hs}" y2="0"><stop offset="0" stop-opacity="1"/><stop offset=".55" stop-opacity=".95"/><stop offset="1" stop-opacity=".6"/></linearGradient>
+    <linearGradient id="gCl3" gradientUnits="userSpaceOnUse" x1="${-hs - f}" y1="0" x2="${-hs}" y2="0"><stop offset="0" stop-opacity="1"/><stop offset=".55" stop-opacity=".95"/><stop offset="1" stop-opacity=".6"/></linearGradient>`,
+    body: `
+      ${collar("cl_f", 0, 0)}${collar("cl_s", 180, 1)}${collar("cl_e", 90, 2)}${collar("cl_x", 270, 3)}
+      <g id="plates">
+        <rect class="hxbody" x="${-hs}" y="${-hs}" width="${hs * 2}" height="${hs * 2}" rx="${hs * 0.08}"/>
+        <g clip-path="url(#cHx)">
+          <g class="rib" id="rib_e"><rect mask="url(#mRibE)" x="${-b}" y="${-hs}" width="${band}" height="${hs * 2}" fill="url(#gExt)"/></g>
+          <g class="rib" id="rib_f"><rect mask="url(#mRibF)" x="${-hs}" y="${-b}" width="${hs * 2}" height="${band}" fill="url(#gFresh)"/></g>
+          <circle class="hglow" r="${b * 0.8}" fill="url(#gGlow)"/>
+          <g class="stack">${plates}</g>
+          <g class="dots" id="dots_e" style="--d:calc(var(--spde,1.3s) * 3.2);--L:${hs}px">${dotsE}</g>
+          <g class="dots" id="dots_f" style="--d:calc(var(--spd,1.3s) * 3.2);--L:${hs}px">${dotsF}</g>
+          <rect id="hxfrost" x="${-hs}" y="${-hs}" width="${hs * 2}" height="${hs * 2}" fill="#dff1ff"/>
+          <g id="hxice">${frost}</g>
+        </g>
+        <rect class="hxframe" x="${-hs}" y="${-hs}" width="${hs * 2}" height="${hs * 2}" rx="${hs * 0.08}" stroke="url(#gBevel)"/>
+        <rect class="hxinner" x="${-hs + 5}" y="${-hs + 5}" width="${hs * 2 - 10}" height="${hs * 2 - 10}" rx="${hs * 0.05}"/>
+        ${bolts ? [[-1, -1], [1, -1], [1, 1], [-1, 1]].map(([x, y]) => `<circle class="bolt" cx="${x * boltXY}" cy="${y * boltXY}" r="3"/>`).join("") : ""}
+      </g>`,
+  };
 }
 
 function buildSVG() {
-  const ch = plateChannels();
   const frost = [[-60, -55, 1], [40, -66, 0.8], [-20, 10, 0.9], [62, 30, 1.1], [-66, 52, 0.7], [18, 64, 0.8]]
     .map(([x, y, s], i) => `<path class="ice" style="animation-delay:${i * 0.35}s" d="${flake(x, y, s)}"/>`).join("");
   let spokes = "";
   for (let i = 0; i < 24; i++) spokes += `<path transform="rotate(${i * 15})" d="M0 -28 V-118"/>`;
+  const hxp = exchanger({ hs: HS, band: 84, lanes: [-22, 0, 22], flare: 54, hc: 10, hb: 15, frost });
   let pleats = "";
   for (let y = 166; y <= 214; y += 6) pleats += `M-11 ${y - 190} L11 ${y - 187}`;
 
@@ -208,14 +251,7 @@ function buildSVG() {
     <linearGradient id="gCase" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#2a3039"/><stop offset="1" stop-color="#1c2027"/></linearGradient>
     <linearGradient id="gHx" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#1d2228"/><stop offset="1" stop-color="#262c34"/></linearGradient>
     <radialGradient id="gFan" cx="0.5" cy="0.5" r="0.5"><stop offset="0.55" stop-color="#14171c"/><stop offset="1" stop-color="#232830"/></radialGradient>
-    <linearGradient id="gFresh" gradientUnits="userSpaceOnUse" x1="${-HS}" y1="0" x2="${HS}" y2="0">
-      <stop id="gf0" offset="0" stop-color="#64b5f6"/><stop id="gf1" offset="1" stop-color="#ffa36b"/>
-    </linearGradient>
-    <linearGradient id="gExt" gradientUnits="userSpaceOnUse" x1="0" y1="${-HS}" x2="0" y2="${HS}">
-      <stop id="ge0" offset="0" stop-color="#ffa36b"/><stop id="ge1" offset="1" stop-color="#64b5f6"/>
-    </linearGradient>
-    <clipPath id="cWeave">${ch.weave}</clipPath>
-    <clipPath id="cHx"><rect x="${-HS}" y="${-HS}" width="${HS * 2}" height="${HS * 2}" rx="6"/></clipPath>
+    ${hxp.defs}
   </defs>
 
   <!-- ===== Outside / house ===== -->
@@ -289,22 +325,7 @@ function buildSVG() {
   <!-- ===== Cross-flow plate exchanger ===== -->
   <g id="hx" class="clickable" data-e="efficiency">
     <g transform="translate(${CX} ${CY}) rotate(45)">
-      ${plenum("pl_f", `${-HS},${-HS} ${-HS},${HS} ${-HS - 40},16 ${-HS - 40},-16`)}
-      ${plenum("pl_s", `${HS},${-HS} ${HS},${HS} ${HS + 40},16 ${HS + 40},-16`)}
-      ${plenum("pl_e", `${-HS},${-HS} ${HS},${-HS} 16,${-HS - 40} -16,${-HS - 40}`)}
-      ${plenum("pl_x", `${-HS},${HS} ${HS},${HS} 16,${HS + 40} -16,${HS + 40}`)}
-      <g id="plates">
-        <rect class="hxbg" x="${-HS}" y="${-HS}" width="${HS * 2}" height="${HS * 2}" rx="6"/>
-        <g clip-path="url(#cHx)">
-          <g class="ch ext" id="ch_e"><g class="cb">${ch.ext}</g><g class="cc">${ch.ext}</g><g class="cf">${ch.ext}</g></g>
-          <g class="ch fresh" id="ch_f"><g class="cb">${ch.fresh}</g><g class="cc">${ch.fresh}</g><g class="cf">${ch.fresh}</g></g>
-          <g class="ch ext" id="ch_e2" clip-path="url(#cWeave)"><g class="cb">${ch.ext}</g><g class="cc">${ch.ext}</g><g class="cf">${ch.ext}</g></g>
-          <rect id="hxfrost" x="${-HS}" y="${-HS}" width="${HS * 2}" height="${HS * 2}" fill="#dff1ff"/>
-          <g id="hxice">${frost}</g>
-        </g>
-        <rect class="hxframe" x="${-HS}" y="${-HS}" width="${HS * 2}" height="${HS * 2}" rx="6"/>
-        <path class="hxedge" d="M${-HS} ${-HS + 14} V${-HS} H${-HS + 14} M${HS - 14} ${-HS} H${HS} V${-HS + 14} M${HS} ${HS - 14} V${HS} H${HS - 14} M${-HS + 14} ${HS} H${-HS} V${HS - 14}"/>
-      </g>
+      ${hxp.body}
     </g>
     <g id="rotorg">
       <circle cx="${CX}" cy="${CY}" r="124" class="rotorbg"/>
@@ -428,24 +449,30 @@ text{paint-order:stroke;stroke:#16191d;stroke-width:4px;stroke-linejoin:round;fo
 @keyframes spin{to{transform:rotate(360deg)}}
 
 /* plate exchanger */
-.plenum{fill:#1a1e24;stroke:#5d6775;stroke-width:1.6;stroke-linejoin:round}
-.hxbg{fill:url(#gHx)}
-.hxframe{fill:none;stroke:#76808d;stroke-width:3}
-.hxedge{fill:none;stroke:#c9d1da;stroke-width:3.5;stroke-linecap:round;opacity:.55}
+.hxbody{fill:url(#gMetal)}
+.stack path{fill:none;stroke-linecap:butt}
+.stack .pl1{stroke:rgba(255,255,255,.12);stroke-width:1.2}
+.stack .pl2{stroke:rgba(0,0,0,.5);stroke-width:2.2}
+.hxframe{fill:none;stroke-width:4.5}
+.hxinner{fill:none;stroke:rgba(255,255,255,.07);stroke-width:1.5}
+.bolt{fill:#59636f;stroke:#16191d;stroke-width:1}
 #plates{transition:filter .8s}
-#hx.on #plates{filter:drop-shadow(0 0 14px color-mix(in srgb,var(--glow,#9be3c0) 40%,transparent))}
-.ch path{fill:none}
-.ch .cb path{stroke:#0f1215;stroke-width:10}
-.ch .cc path{stroke-width:5.5;transition:opacity .8s}
-.ch.fresh .cc path{stroke:url(#gFresh)}
-.ch.ext .cc path{stroke:url(#gExt)}
-.ch .cf path{stroke:rgba(255,255,255,.9);stroke-width:2.2;stroke-dasharray:2.5 13.5;opacity:0}
-.ch{opacity:var(--co,1);transition:opacity .8s}
-#hx.on .ch .cf path{opacity:1;animation:flowc var(--spd,1.3s) linear infinite}
-#hx.on .ch.ext .cf path{animation-duration:var(--spde,1.3s)}
-.ch.off .cc path{opacity:.35}
+#hx.on #plates{filter:drop-shadow(0 0 16px color-mix(in srgb,var(--glow,#9be3c0) 35%,transparent))}
+.rib{mix-blend-mode:screen;opacity:calc(var(--co,1) * .85);transition:opacity .8s}
+.rib.off{opacity:.18}
+.hglow{opacity:0;transition:opacity .8s}
+#hx.on .hglow{animation:breathe 3.2s ease-in-out infinite}
+@keyframes breathe{0%,100%{opacity:.05}50%{opacity:.22}}
+.dots path{fill:none;stroke:url(#gStreak);stroke-width:3.2;stroke-linecap:round;opacity:0}
+#hx.on .dots path{animation:slide var(--d,4s) linear infinite;animation-delay:calc(var(--d,4s) * var(--i) * -1)}
+#dots_f{opacity:var(--co,1)}
+.dots.off path{animation:none!important;opacity:0!important}
+@keyframes slide{0%{transform:translateX(calc(var(--L) * -1));opacity:0}18%,82%{opacity:.85}100%{transform:translateX(var(--L));opacity:0}}
+.clb{fill:#0f1215}
+.cl{transition:fill .6s}
+#gCl0 stop,#gCl1 stop,#gCl2 stop,#gCl3 stop{stop-color:#4a525d;transition:stop-color .6s}
 #hxfrost,#hxice{opacity:0;transition:opacity .8s}
-#hx.defrost #hxfrost{opacity:.2}
+#hx.defrost #hxfrost{opacity:.22}
 #hx.defrost #hxice{opacity:1}
 .ice{fill:none;stroke:#e8f6ff;stroke-width:2.4;stroke-linecap:round}
 #hx.defrost .ice{animation:twinkle 2.4s ease-in-out infinite}
@@ -454,7 +481,7 @@ text{paint-order:stroke;stroke:#16191d;stroke-width:4px;stroke-linejoin:round;fo
 /* rotary exchanger (R series) */
 #rotorg{display:none}
 #hx.rotor #rotorg{display:inline}
-#hx.rotor #plates,#hx.rotor .plenum{display:none}
+#hx.rotor #plates,#hx.rotor .cl,#hx.rotor .clb{display:none}
 .rotorbg{fill:#1d2228;stroke:#76808d;stroke-width:3}
 .rim{fill:none;stroke:#8a96a3;stroke-width:3}.rim.thin{stroke-width:1.4;opacity:.6}
 .spokes path{stroke:#68727f;stroke-width:1.6}
@@ -801,13 +828,7 @@ class SwegonCasaCard extends HTMLElement {
     this._$("ge1").setAttribute("stop-color", cExh);
     hx.style.setProperty("--spd", sSpd);
     hx.style.setProperty("--spde", eSpd);
-    hx.style.setProperty("--glow", lerpColor(cExt, cPre, 0.5));
-    this._var("ch_f", "--co", (1 - 0.75 * bp).toFixed(2));
-    this._cls("ch_f", "off", !sOn);
-    this._cls("ch_e", "off", !eOn);
-    this._cls("ch_e2", "off", !eOn);
-    const plen = (id, c, on) => { const el = this._$(id); if (el) el.style.fill = on ? `color-mix(in srgb, ${c} 22%, #1a1e24)` : ""; };
-    plen("pl_f", cPre, sOn); plen("pl_s", cSup1, sOn); plen("pl_e", cExt, eOn); plen("pl_x", cExh, eOn);
+    this._exchanger(sOn, eOn, bp, cPre, cSup1, cExt, cExh);
     const rpm = this._n("rotor_rpm");
     hx.classList.toggle("spin", rotor && running && (rpm == null ? this._on("rotor") || !this._has("rotor") : rpm > 0));
     if (rpm) hx.style.setProperty("--rspd", `${clamp(30 / rpm, 2, 12).toFixed(1)}s`);
@@ -872,6 +893,16 @@ class SwegonCasaCard extends HTMLElement {
     this._txt("l_house", t.house);
     this._txt("t_room", this._T("room"));
     this._show("house", true);
+  }
+
+  _exchanger(sOn, eOn, bp, cIn, cOut, cExt, cExh) {
+    this._var("hx", "--co", (1 - 0.75 * bp).toFixed(2));
+    const card = this.shadowRoot.querySelector("ha-card");
+    if (card) card.style.setProperty("--glow", lerpColor(cExt, cIn, 0.5));
+    this._cls("rib_f", "off", !sOn); this._cls("dots_f", "off", !sOn);
+    this._cls("rib_e", "off", !eOn); this._cls("dots_e", "off", !eOn);
+    const collar = (gid, c, on) => this.shadowRoot.querySelectorAll(`#${gid} stop`).forEach((st) => { st.style.stopColor = on ? c : ""; });
+    collar("gCl0", cIn, sOn); collar("gCl1", cOut, sOn); collar("gCl2", cExt, eOn); collar("gCl3", cExh, eOn);
   }
 
   _updateControls(t, S) {
@@ -986,10 +1017,10 @@ const MINI_CSS = `
 .mini svg{width:100%;height:auto;display:block}
 .mini .duct .pb{stroke-width:11}.mini .duct .pg{stroke-width:13}.mini .duct .pc{stroke-width:6}
 .mini .duct .pf{stroke-width:1.8;stroke-dasharray:1.5 9}.mini .duct.on .pf{animation-name:flowm}
-.mini .ch .cb path{stroke-width:3.4}.mini .ch .cc path{stroke-width:2.3}.mini .ch .cf path{stroke-width:1;stroke-dasharray:1 6}
-.mini #hx.on .ch .cf path{animation-name:flowm2}
+.mini .dots path{stroke-width:1.6}
+.mini .stack .pl1,.mini .stack .pl2{stroke-width:.8}.mini .hxframe{stroke-width:1.6}.mini .hxinner{display:none}
 @keyframes flowm{to{stroke-dashoffset:-10.5}}
-@keyframes flowm2{to{stroke-dashoffset:-7}}
+@keyframes flowm2{to{stroke-dashoffset:-9.1}}
 .mtop{display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;min-width:0}
 .mname{font-size:14px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .mini .pill{padding:4px 10px 4px 8px;font-size:12px}
@@ -1006,31 +1037,16 @@ const MINI_CSS = `
 `;
 
 function buildMiniSVG() {
-  const hs = 26;
-  let ext = "", fresh = "";
-  for (let i = 0; i < 6; i++) {
-    const k = -21.5 + i * 8.6;
-    ext += `<path d="M${k.toFixed(1)} ${-hs} V${hs}"/>`;
-    fresh += `<path d="M${-hs} ${k.toFixed(1)} H${hs}"/>`;
-  }
+  const hx = exchanger({ hs: 26, band: 26, lanes: [0], flare: 12, hc: 3, hb: 5.5, bolts: false });
   return `
 <svg viewBox="0 0 200 122" xmlns="http://www.w3.org/2000/svg">
-  <defs>
-    <linearGradient id="gFresh" gradientUnits="userSpaceOnUse" x1="${-hs}" y1="0" x2="${hs}" y2="0"><stop id="gf0" offset="0" stop-color="#64b5f6"/><stop id="gf1" offset="1" stop-color="#ffa36b"/></linearGradient>
-    <linearGradient id="gExt" gradientUnits="userSpaceOnUse" x1="0" y1="${-hs}" x2="0" y2="${hs}"><stop id="ge0" offset="0" stop-color="#ffa36b"/><stop id="ge1" offset="1" stop-color="#64b5f6"/></linearGradient>
-    <linearGradient id="gHx" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#1d2228"/><stop offset="1" stop-color="#262c34"/></linearGradient>
-  </defs>
+  <defs>${hx.defs}</defs>
   ${pipe("mp_fresh", "M4 22 H58 L82 42", "duct")}
   ${pipe("mp_ext", "M196 22 H142 L118 42", "duct")}
   ${pipe("mp_exh", "M82 80 L58 100 H4", "duct")}
   ${pipe("mp_sup", "M118 80 L142 100 H196", "duct")}
   <g id="hx" class="mclick" data-e="efficiency">
-    <g transform="translate(100 61) rotate(45)">
-      <rect class="hxbg" x="${-hs}" y="${-hs}" width="${hs * 2}" height="${hs * 2}" rx="3"/>
-      <g class="ch ext" id="ch_e"><g class="cb">${ext}</g><g class="cc">${ext}</g><g class="cf">${ext}</g></g>
-      <g class="ch fresh" id="ch_f"><g class="cb">${fresh}</g><g class="cc">${fresh}</g><g class="cf">${fresh}</g></g>
-      <rect class="hxframe" x="${-hs}" y="${-hs}" width="${hs * 2}" height="${hs * 2}" rx="3" style="stroke-width:2"/>
-    </g>
+    <g transform="translate(100 61) rotate(45)">${hx.body}</g>
   </g>
 </svg>`;
 }
@@ -1099,7 +1115,7 @@ class SwegonCasaMiniCard extends SwegonCasaCard {
     this._$("gf1").setAttribute("stop-color", cSup);
     this._$("ge0").setAttribute("stop-color", cExt);
     this._$("ge1").setAttribute("stop-color", cExh);
-    this._var("ch_f", "--co", (1 - 0.75 * (S.bypass ? clamp(S.bypass, 0, 100) / 100 : 0)).toFixed(2));
+    this._exchanger(S.sOn, S.eOn, S.bypass ? clamp(S.bypass, 0, 100) / 100 : 0, cFresh, cSup, cExt, cExh);
 
     const deg = (v) => (v == null ? "—" : `${this._f(v, 1)}<small>°</small>`);
     this._html("m_out", deg(S.fresh));

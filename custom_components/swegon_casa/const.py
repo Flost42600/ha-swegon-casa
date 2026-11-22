@@ -6,7 +6,7 @@ from typing import Final
 
 DOMAIN: Final = "swegon_casa"
 MANUFACTURER: Final = "Swegon"
-VERSION: Final = "0.2.0"  # keep in sync with manifest.json
+VERSION: Final = "0.2.1"  # keep in sync with manifest.json
 
 CONF_KIND: Final = "kind"  # "serial" or "tcp"
 CONF_SERIAL_PORT: Final = "serial_port"
