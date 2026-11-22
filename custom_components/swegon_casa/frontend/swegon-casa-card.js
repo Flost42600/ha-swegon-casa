@@ -14,7 +14,7 @@
  */
 
 const DOMAIN = "swegon_casa";
-const CARD_VERSION = "0.2.2";
+const CARD_VERSION = "0.2.3";
 
 /* ------------------------------------------------------------------------------------------ */
 /*  Entities: card key -> [domain, translation keys by preference]                            */
@@ -222,18 +222,6 @@ function buildSVG() {
     ${hxp.defs}
   </defs>
 
-  <!-- ===== Outside / house ===== -->
-  <g id="outside" class="clickable" data-e="fresh">
-    <circle cx="96" cy="300" r="15" class="sun"/>
-    <path class="cloud" d="M76 344 h66 a17 17 0 0 0 -4 -33 a24 24 0 0 0 -45 6 a14 14 0 0 0 -17 27z"/>
-    <text id="l_out" class="sub" x="110" y="378" text-anchor="middle"></text>
-  </g>
-  <g id="house" class="clickable" data-e="room">
-    <path class="housep" d="M1074 330 L1125 288 L1176 330 M1084 322 V378 H1166 V322"/>
-    <text id="t_room" class="lbl" x="1125" y="352" text-anchor="middle"></text>
-    <text id="l_house" class="sub" x="1125" y="404" text-anchor="middle"></text>
-  </g>
-
   <!-- ===== Casing ===== -->
   <rect x="230" y="70" width="780" height="490" rx="26" fill="url(#gCase)" stroke="#4b5462" stroke-width="2.5"/>
   <rect x="244" y="76" width="752" height="6" rx="3" fill="#fff" opacity=".05"/>
@@ -345,12 +333,11 @@ text{paint-order:stroke;stroke:#16191d;stroke-width:4px;stroke-linejoin:round;fo
 /* narrow layout: same drawing, larger text, secondary labels hidden */
 .narrow .lbl{font-size:calc(10.5px * var(--k,2))}.narrow .big{font-size:calc(12px * var(--k,2))}.narrow .sub{font-size:calc(9.5px * var(--k,2))}
 .narrow text{stroke-width:calc(1.6px * var(--k,2))}
-.narrow #l_flt_f,.narrow #l_flt_e,.narrow #t_pre,.narrow #t_post,.narrow #l_eff,.narrow #t_fe,.narrow #t_fs,.narrow #l_out,.narrow #l_house,
-.narrow #outside,.narrow #r_fe,.narrow #r_fs,.narrow #house .housep,.narrow #l_fresh,.narrow #l_exh,.narrow #l_ext,.narrow #l_sup{visibility:hidden}
+.narrow #l_flt_f,.narrow #l_flt_e,.narrow #t_pre,.narrow #t_post,.narrow #l_eff,.narrow #t_fe,.narrow #t_fs,
+.narrow #r_fe,.narrow #r_fs,.narrow #l_fresh,.narrow #l_exh,.narrow #l_ext,.narrow #l_sup{visibility:hidden}
 .narrow #t_fresh{transform:translateY(-14px)}.narrow #t_ext{transform:translateY(-14px)}
 .narrow #t_exh{transform:translateY(30px)}.narrow #t_sup{transform:translateY(30px)}
 .narrow #t_eff{transform:translateY(14px)}.narrow #t_byp{transform:translateY(8px)}
-.narrow #t_room{transform:translate(-4px,-6px)}
 
 /* ducts (same layered pipes as the Vitocal card, air sized) */
 .pipe path{fill:none;stroke-linecap:round;stroke-linejoin:round}
@@ -371,11 +358,6 @@ text{paint-order:stroke;stroke:#16191d;stroke-width:4px;stroke-linejoin:round;fo
 @keyframes flowd{to{stroke-dashoffset:-24}}
 @keyframes flowc{to{stroke-dashoffset:-16}}
 
-
-/* outside / house */
-.sun{fill:#ffd27a;opacity:.85}
-.cloud{fill:#3a414b;stroke:#68727f;stroke-width:1.6}
-.housep{fill:none;stroke:#9aa3ad;stroke-width:2.4;stroke-linejoin:round;stroke-linecap:round}
 
 /* by-pass damper */
 .dhouse{fill:#1d2228;stroke:#68727f;stroke-width:2.2;transition:stroke .6s}
@@ -454,7 +436,7 @@ text{paint-order:stroke;stroke:#16191d;stroke-width:4px;stroke-linejoin:round;fo
 .alert button b{color:#16191d}
 
 /* tiles */
-.tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(118px,1fr));gap:8px;padding:4px 14px 14px}
+.tiles{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;padding:4px 14px 14px}
 .tile{background:rgba(255,255,255,.035);border:1px solid rgba(255,255,255,.06);border-radius:12px;padding:10px 12px;cursor:pointer;transition:background .2s;min-width:0}
 .tile:hover{background:rgba(255,255,255,.07)}
 .tl{font-size:11.5px;color:#9aa3ad;text-transform:uppercase;letter-spacing:.6px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
@@ -527,6 +509,7 @@ class SwegonCasaCard extends HTMLElement {
         </div>
         <div class="alerts" id="alerts"></div>
         <div class="tiles" id="tiles">
+          <div class="tile" data-e="room" id="k_room_w"><div class="tl">${esc(t.room)}</div><div class="tv" id="k_room">—</div><div class="ts" id="k_room_s"></div></div>
           <div class="tile" data-e="efficiency" id="k_eff_w"><div class="tl">${esc(t.efficiency)}</div><div class="tv" id="k_eff">—</div><div class="bar"><i id="k_eff_b"></i></div></div>
           <div class="tile" data-e="supply_flow" id="k_flow_w"><div class="tl">${esc(t.airflow)}</div><div class="tv" id="k_flow">—</div><div class="ts" id="k_flow_s"></div></div>
           <div class="tile" data-e="supply_fan" id="k_fans_w"><div class="tl">${esc(t.fans)}</div><div class="tv" id="k_fans">—</div><div class="ts" id="k_fans_s"></div></div>
@@ -826,10 +809,6 @@ class SwegonCasaCard extends HTMLElement {
     this._txt("l_sup", t.supply); this._txt("t_sup", this._T("supply") || "—");
     this._$("t_fresh").style.fill = cFresh; this._$("t_exh").style.fill = cExh;
     this._$("t_ext").style.fill = cExt; this._$("t_sup").style.fill = cSup;
-    this._txt("l_out", t.outside);
-    this._txt("l_house", t.house);
-    this._txt("t_room", this._T("room"));
-    this._show("house", true);
   }
 
   _exchanger(sOn, eOn, bp, cIn, cOut, cExt, cExh, sSpd, eSpd) {
@@ -870,6 +849,11 @@ class SwegonCasaCard extends HTMLElement {
 
   _updateTiles(t, S) {
     const tile = (id, has) => this._show(`${id}_w`, has);
+
+    const room = this._n("room");
+    tile("k_room", this._has("room"));
+    this._html("k_room", room != null ? `${this._f(room, 1)}<small>°C</small>` : "—");
+    this._txt("k_room_s", "");
 
     tile("k_eff", S.eff != null || this._has("efficiency"));
     this._html("k_eff", S.eff != null ? `${this._f(S.eff, 0)}<small>%</small>` : "—");
