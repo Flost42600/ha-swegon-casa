@@ -1,29 +1,92 @@
-/*
- * Swegon CASA card for Home Assistant, shipped with the swegon_casa integration.
+/*!
+ * Swegon CASA card: animated Lovelace card for Swegon CASA air handling units.
+ * Shipped with the swegon_casa integration (loaded automatically), version below.
  *
- *   type: custom:swegon-casa-card
- *   device_id: <optional, when several units are configured>
- *   title: <optional>
+ *   type: custom:swegon-casa-card        (or custom:swegon-casa-mini-card)
+ *   title: Ventilation                   optional, defaults to the device name
+ *   device_id: <id>                      optional, when several units are configured
+ *   exchanger: plate | rotor             optional, detected from the entities
+ *   show_header / show_controls / show_stats: true
+ *   entities:                            optional overrides, e.g. for a YAML modbus setup
+ *     fresh: sensor.casa_air_neuf
  *
- * Entities are found by themselves (platform + translation key).
+ * Entities are found by themselves (platform swegon_casa + translation key).
  */
 
 const DOMAIN = "swegon_casa";
-const CARD_VERSION = "0.1.0";
+const CARD_VERSION = "0.2.0";
+
+/* ------------------------------------------------------------------------------------------ */
+/*  Entities: card key -> [domain, translation keys by preference]                            */
+/* ------------------------------------------------------------------------------------------ */
+const DISCOVERY = {
+  fan: ["fan", null],
+  mode: ["select", ["operating_mode"]],
+  ventilation: ["sensor", ["ventilation_state"]],
+  unit_state: ["sensor", ["unit_state"]],
+  fresh: ["sensor", ["fresh_air_temperature"]],
+  supply: ["sensor", ["supply_air_temperature"]],
+  supply_pre: ["sensor", ["supply_before_heater_temperature"]],
+  extract: ["sensor", ["extract_air_temperature"]],
+  exhaust: ["sensor", ["exhaust_air_temperature"]],
+  room: ["sensor", ["room_temperature"]],
+  preheater_temp: ["sensor", ["preheater_temperature"]],
+  efficiency: ["sensor", ["heat_recovery_efficiency"]],
+  supply_fan: ["sensor", ["supply_fan_control"]],
+  exhaust_fan: ["sensor", ["exhaust_fan_control"]],
+  supply_rpm: ["sensor", ["supply_fan_rpm"]],
+  exhaust_rpm: ["sensor", ["exhaust_fan_rpm"]],
+  supply_flow: ["sensor", ["supply_airflow"]],
+  exhaust_flow: ["sensor", ["exhaust_airflow"]],
+  bypass: ["sensor", ["bypass_position"]],
+  bypass_manual: ["sensor", ["manual_bypass"]],
+  preheater_power: ["sensor", ["preheater_power", "nordic_preheater_power"]],
+  preheater_active: ["binary_sensor", ["preheater_active"]],
+  heater_power: ["sensor", ["supply_control_power"]],
+  heater_setpoint: ["sensor", ["temperature_setpoint_active"]],
+  cooling: ["binary_sensor", ["cooling_active"]],
+  defrost: ["binary_sensor", ["defrost"]],
+  night_cooling: ["binary_sensor", ["summer_cooling_active"]],
+  rotor: ["binary_sensor", ["rotor_active"]],
+  rotor_rpm: ["sensor", ["rotor_rpm"]],
+  co2: ["sensor", ["co2"]],
+  humidity: ["sensor", ["humidity"]],
+  abs_humidity: ["sensor", ["absolute_humidity"]],
+  voc: ["sensor", ["voc"]],
+  boost_left: ["sensor", ["boost_time_left"]],
+  week_timer: ["binary_sensor", ["week_timer_active"]],
+  alarm: ["binary_sensor", ["alarm"]],
+  filter: ["binary_sensor", ["filter_info"]],
+  service: ["binary_sensor", ["service_info"]],
+  hours_service: ["sensor", ["hours_to_service"]],
+  fireplace: ["switch", ["fireplace"]],
+  confirm_filter: ["button", ["confirm_filter"]],
+  confirm_service: ["button", ["confirm_service"]],
+};
+
+const MODE_KEYS = ["stopped", "away", "home", "boost", "travelling"];
+const MODES = {
+  stopped: { color: "#7d8794", icon: "mdi:power" },
+  away: { color: "#8ea4bd", icon: "mdi:home-export-outline" },
+  home: { color: "#6fdc8c", icon: "mdi:home" },
+  boost: { color: "#ff8a3d", icon: "mdi:fan-plus" },
+  travelling: { color: "#b39ddb", icon: "mdi:airplane" },
+};
 
 const T = {
   fr: {
     outside: "Extérieur", house: "Maison",
-    fresh: "Air neuf", supply: "Soufflage", extract: "Extraction", exhaust: "Rejet",
+    fresh: "Air neuf", supply: "Soufflé", extract: "Extrait", exhaust: "Rejeté",
     modes: { stopped: "Arrêt", away: "Absent", home: "Maison", boost: "Boost", travelling: "Voyage" },
     states: { external_stop: "Arrêt externe", user_stopped: "Arrêtée", starting: "Démarrage", normal: "En marche", commissioning: "Mise en service" },
-    efficiency: "Rendement", airflow: "Débit", fans: "Ventilateurs", room: "Ambiance",
-    co2: "CO2", humidity: "Humidité", voc: "COV",
-    fireplace: "Cheminée", nightCooling: "Rafraîchissement nocturne", active: "actif",
-    alarm: "Alarme", filter: "Filtre à remplacer", service: "Entretien à prévoir", confirm: "Acquitter",
-    serviceIn: (h) => `Entretien dans ${h} h`, notFound: "Aucune centrale Swegon CASA trouvée.",
-    rotor: "Roue", defrost: "Dégivrage", unavailable: "Centrale injoignable",
-    bypass: "By-pass", preheater: "Préchauffe", postheater: "Post-chauffe",
+    unreachable: "Injoignable", filter: "Filtre", filterDue: "Filtre à remplacer", serviceDue: "Entretien à prévoir", confirm: "Acquitter",
+    preheater: "Préchauffe", postheater: "Post-chauffe", cooling: "Froid", bypass: "By-pass", closed: "fermé",
+    efficiency: "Rendement", recovery: "récupération", airflow: "Débit", fans: "Ventilateurs", supplyShort: "Soufflage", extractShort: "Extr.",
+    co2: "CO₂", humidity: "Humidité", voc: "COV", service: "Entretien", inDays: (d) => `dans ${d} j`,
+    fireplace: "Cheminée", nightCooling: "Rafraîchissement nocturne", defrost: "Dégivrage", alarm: "Alarme", weekTimer: "Programme horaire",
+    rpm: "tr/min", rotor: "Roue", plates: "Échangeur à plaques", left: (m) => `encore ${m} min`, room: "Ambiance", setpoint: "consigne",
+    short: { out: "Ext.", supply: "Soufflé", eff: "Rend." },
+    notFound: "Aucune centrale Swegon CASA trouvée. Indiquez les entités avec la clé entities:.",
     alarms: {
       reheater_failure: "Défaut post-chauffage", preheater_failure: "Défaut préchauffage", external_preheater_failure: "Défaut préchauffage externe",
       freezing_danger: "Risque de gel", supply_fan_failure: "Défaut ventilateur soufflage", exhaust_fan_failure: "Défaut ventilateur extraction",
@@ -37,437 +100,1034 @@ const T = {
     fresh: "Fresh air", supply: "Supply", extract: "Extract", exhaust: "Exhaust",
     modes: { stopped: "Stop", away: "Away", home: "Home", boost: "Boost", travelling: "Travel" },
     states: { external_stop: "External stop", user_stopped: "Stopped", starting: "Starting", normal: "Running", commissioning: "Commissioning" },
-    efficiency: "Efficiency", airflow: "Airflow", fans: "Fans", room: "Room",
-    co2: "CO2", humidity: "Humidity", voc: "VOC",
-    fireplace: "Fireplace", nightCooling: "Night cooling", active: "active",
-    alarm: "Alarm", filter: "Replace the filter", service: "Service due", confirm: "Confirm",
-    serviceIn: (h) => `Service in ${h} h`, notFound: "No Swegon CASA unit found.",
-    rotor: "Rotor", defrost: "Defrost", unavailable: "Unit unreachable",
-    bypass: "Bypass", preheater: "Preheater", postheater: "Re-heater",
-    alarms: {},
+    unreachable: "Unreachable", filter: "Filter", filterDue: "Replace the filter", serviceDue: "Service due", confirm: "Confirm",
+    preheater: "Preheater", postheater: "Re-heater", cooling: "Cooling", bypass: "Bypass", closed: "closed",
+    efficiency: "Efficiency", recovery: "heat recovery", airflow: "Airflow", fans: "Fans", supplyShort: "Supply", extractShort: "Extr.",
+    co2: "CO₂", humidity: "Humidity", voc: "VOC", service: "Service", inDays: (d) => `in ${d} d`,
+    fireplace: "Fireplace", nightCooling: "Night cooling", defrost: "Defrost", alarm: "Alarm", weekTimer: "Week timer",
+    rpm: "rpm", rotor: "Rotor", plates: "Plate exchanger", left: (m) => `${m} min left`, room: "Room", setpoint: "setpoint",
+    short: { out: "Out", supply: "Supply", eff: "Eff." },
+    notFound: "No Swegon CASA unit found. Set the entities with the entities: key.",
+    alarms: {
+      reheater_failure: "Re-heater failure", preheater_failure: "Preheater failure", external_preheater_failure: "External preheater failure",
+      freezing_danger: "Freezing danger", supply_fan_failure: "Supply fan failure", exhaust_fan_failure: "Exhaust fan failure",
+      temperature_sensor_failure: "Sensor failure", emergency_stop: "Emergency stop", filter_guard: "Filter", service: "Service",
+      internal_temperature: "Internal temperature", supply_temperature_low: "Supply air too cold", supply_temperature_high: "Supply air too warm",
+      preheater_temperature_high: "Preheater too hot", rotor: "Rotor failure", fan_control: "Fan control",
+    },
   },
 };
 
-const ICON = {
-  fan: "M12 11a1 1 0 1 0 0 2 1 1 0 0 0 0-2m.5-9C17 2 17.11 5.57 14.75 6.75c-.99.49-1.43 1.54-1.62 2.47.48.2.9.51 1.22.91 3.7-2 7.68-1.21 7.68 2.37C22 17 18.43 17.11 17.25 14.75c-.5-.99-1.56-1.43-2.48-1.62-.2.48-.51.89-.91 1.22 2 3.69 1.2 7.65-2.36 7.65C7 22 6.89 18.42 9.24 17.24c.98-.49 1.42-1.53 1.62-2.45-.49-.2-.92-.52-1.24-.92C5.94 15.87 2 15.08 2 11.5 2 7 5.56 6.89 6.74 9.26c.5.99 1.55 1.42 2.48 1.61.19-.48.51-.9.92-1.22C8.15 5.96 8.94 2 12.5 2z",
-  fire: "M17.66 11.2c-.23-.3-.51-.56-.77-.82-.67-.6-1.43-1.03-2.07-1.66C13.33 7.26 13 4.85 13.95 3c-.95.23-1.78.75-2.49 1.32-2.59 2.08-3.61 5.75-2.39 8.9.04.1.08.2.08.33 0 .22-.15.42-.35.5-.23.1-.47.04-.66-.12a.58.58 0 0 1-.14-.17c-1.13-1.43-1.31-3.48-.55-5.12C5.78 10 4.87 12.3 5 14.47c.06.5.12 1 .29 1.5.14.6.41 1.2.71 1.73 1.08 1.73 2.95 2.97 4.96 3.22 2.14.27 4.43-.12 6.07-1.6 1.83-1.66 2.47-4.32 1.53-6.6l-.13-.26c-.21-.46-.77-1.26-.77-1.26z",
-  moon: "M17.75 4.09 15.22 6.03l.91 3.06-2.63-1.81-2.63 1.81.91-3.06-2.53-1.94L12.44 4l1.06-3 1.06 3 3.19.09m3.5 6.91-1.64 1.25.59 1.98-1.7-1.17-1.7 1.17.59-1.98L15.75 11l2.06-.05L18.5 9l.69 1.95 2.06.05m-2.28 4.95c.83-.08 1.72 1.1 1.19 1.85-.32.45-.66.87-1.08 1.27C15.17 23 8.84 23 4.94 19.07c-3.91-3.9-3.91-10.24 0-14.14.4-.4.82-.76 1.27-1.08.75-.53 1.93.36 1.85 1.19-.27 2.86.69 5.83 2.89 8.02a9.96 9.96 0 0 0 8.02 2.89z",
-  alert: "M13 14h-2V9h2m0 9h-2v-2h2M1 21h22L12 2 1 21z",
-  wrench: "M22.7 19l-9.1-9.1c.9-2.3.4-5-1.5-6.9-2-2-5-2.4-7.4-1.3L9 6 6 9 1.6 4.7C.4 7.1.9 10.1 2.9 12.1c1.9 1.9 4.6 2.4 6.9 1.5l9.1 9.1c.4.4 1 .4 1.4 0l2.3-2.3c.5-.4.5-1.1.1-1.4z",
-};
+/* ------------------------------------------------------------------------------------------ */
+/*  Helpers                                                                                    */
+/* ------------------------------------------------------------------------------------------ */
+const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
 
-function icon(name, size = 18) {
-  return `<svg viewBox="0 0 24 24" width="${size}" height="${size}" aria-hidden="true"><path fill="currentColor" d="${ICON[name]}"/></svg>`;
+const pipe = (id, d, cls = "") =>
+  `<g class="pipe ${cls}" id="${id}"><path class="pb" d="${d}"/><path class="pg" d="${d}"/><path class="pc" d="${d}"/><path class="pf" d="${d}"/></g>`;
+
+function lerpColor(a, b, t) {
+  const pa = parseInt(a.slice(1), 16), pb = parseInt(b.slice(1), 16);
+  const ch = (s) => Math.round(((pa >> s) & 255) + (((pb >> s) & 255) - ((pa >> s) & 255)) * t);
+  return "#" + ((1 << 24) | (ch(16) << 16) | (ch(8) << 8) | ch(0)).toString(16).slice(1);
 }
+
+// Air temperature -> colour: deep blue when freezing, mint around 15 °C, orange when warm.
+const AIR_STOPS = [[-15, "#3d6bff"], [-3, "#4f8dff"], [5, "#64b5f6"], [11, "#6fd3e8"], [15, "#9be3c0"], [18, "#ffd27a"], [22, "#ffa36b"], [27, "#ff7a45"], [35, "#ff4b2b"]];
+function airColor(t) {
+  if (t == null || isNaN(t)) return "#8a96a3";
+  if (t <= AIR_STOPS[0][0]) return AIR_STOPS[0][1];
+  for (let i = 1; i < AIR_STOPS.length; i++) {
+    if (t <= AIR_STOPS[i][0]) {
+      const [t0, c0] = AIR_STOPS[i - 1], [t1, c1] = AIR_STOPS[i];
+      return lerpColor(c0, c1, (t - t0) / (t1 - t0));
+    }
+  }
+  return AIR_STOPS[AIR_STOPS.length - 1][1];
+}
+
+function flake(x, y, s = 1) {
+  const l = 7 * s;
+  let p = "";
+  for (let a = 0; a < 180; a += 60) {
+    const r = (a * Math.PI) / 180, dx = Math.cos(r) * l, dy = Math.sin(r) * l;
+    p += `M${(x - dx).toFixed(1)} ${(y - dy).toFixed(1)}L${(x + dx).toFixed(1)} ${(y + dy).toFixed(1)}`;
+  }
+  return p;
+}
+
+const fanBlades = (scale = 1) => {
+  let b = "";
+  for (let i = 0; i < 5; i++) {
+    b += `<path transform="rotate(${i * 72}) scale(${scale})" d="M0 -6 C10 -14 22 -40 8 -52 C-6 -58 -14 -34 -6 -10 Z"/>`;
+  }
+  return b;
+};
 
 function esc(v) {
   return String(v ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
 }
 
+/* ------------------------------------------------------------------------------------------ */
+/*  Static SVG                                                                                 */
+/*  Fresh air enters top left and leaves as supply air bottom right; extract air enters top   */
+/*  right and leaves as exhaust bottom left. Both streams cross in the plate exchanger.       */
+/* ------------------------------------------------------------------------------------------ */
+const CX = 620, CY = 330, HS = 92; // exchanger centre, half side of the plate stack (local frame)
+
+function plateChannels() {
+  // Local frame: rotate(45) makes +x point down-right (fresh -> supply) and +y down-left (extract -> exhaust).
+  // Every other crossing shows the extract channel on top, so the two streams look woven like real plates.
+  const ks = [];
+  for (let i = 0; i < 9; i++) ks.push(-80 + i * 20);
+  let ext = "", fresh = "", weave = "";
+  ks.forEach((k, i) => {
+    ext += `<path d="M${k} ${-HS} V${HS}"/>`;
+    fresh += `<path d="M${-HS} ${k} H${HS}"/>`;
+    ks.forEach((k2, j) => { if ((i + j) % 2 === 0) weave += `<rect x="${k - 10}" y="${k2 - 10}" width="20" height="20"/>`; });
+  });
+  return { ext, fresh, weave };
+}
+
+function plenum(id, pts) {
+  return `<polygon id="${id}" class="plenum" points="${pts}"/>`;
+}
+
+function buildSVG() {
+  const ch = plateChannels();
+  const frost = [[-60, -55, 1], [40, -66, 0.8], [-20, 10, 0.9], [62, 30, 1.1], [-66, 52, 0.7], [18, 64, 0.8]]
+    .map(([x, y, s], i) => `<path class="ice" style="animation-delay:${i * 0.35}s" d="${flake(x, y, s)}"/>`).join("");
+  let spokes = "";
+  for (let i = 0; i < 24; i++) spokes += `<path transform="rotate(${i * 15})" d="M0 -28 V-118"/>`;
+  let pleats = "";
+  for (let y = 166; y <= 214; y += 6) pleats += `M-11 ${y - 190} L11 ${y - 187}`;
+
+  return `
+<svg viewBox="0 52 1240 522" xmlns="http://www.w3.org/2000/svg" id="svg" role="img" aria-label="Swegon CASA">
+  <defs>
+    <linearGradient id="gCase" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#2a3039"/><stop offset="1" stop-color="#1c2027"/></linearGradient>
+    <linearGradient id="gHx" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#1d2228"/><stop offset="1" stop-color="#262c34"/></linearGradient>
+    <radialGradient id="gFan" cx="0.5" cy="0.5" r="0.5"><stop offset="0.55" stop-color="#14171c"/><stop offset="1" stop-color="#232830"/></radialGradient>
+    <linearGradient id="gFresh" gradientUnits="userSpaceOnUse" x1="${-HS}" y1="0" x2="${HS}" y2="0">
+      <stop id="gf0" offset="0" stop-color="#64b5f6"/><stop id="gf1" offset="1" stop-color="#ffa36b"/>
+    </linearGradient>
+    <linearGradient id="gExt" gradientUnits="userSpaceOnUse" x1="0" y1="${-HS}" x2="0" y2="${HS}">
+      <stop id="ge0" offset="0" stop-color="#ffa36b"/><stop id="ge1" offset="1" stop-color="#64b5f6"/>
+    </linearGradient>
+    <clipPath id="cWeave">${ch.weave}</clipPath>
+    <clipPath id="cHx"><rect x="${-HS}" y="${-HS}" width="${HS * 2}" height="${HS * 2}" rx="6"/></clipPath>
+  </defs>
+
+  <!-- ===== Outside / house ===== -->
+  <g id="outside" class="clickable" data-e="fresh">
+    <circle cx="96" cy="300" r="15" class="sun"/>
+    <path class="cloud" d="M76 344 h66 a17 17 0 0 0 -4 -33 a24 24 0 0 0 -45 6 a14 14 0 0 0 -17 27z"/>
+    <text id="l_out" class="sub" x="110" y="378" text-anchor="middle"></text>
+  </g>
+  <g id="house" class="clickable" data-e="room">
+    <path class="housep" d="M1074 330 L1125 288 L1176 330 M1084 322 V378 H1166 V322"/>
+    <text id="t_room" class="lbl" x="1125" y="352" text-anchor="middle"></text>
+    <text id="l_house" class="sub" x="1125" y="404" text-anchor="middle"></text>
+  </g>
+
+  <!-- ===== Casing ===== -->
+  <rect x="230" y="70" width="780" height="490" rx="26" fill="url(#gCase)" stroke="#4b5462" stroke-width="2.5"/>
+  <rect x="244" y="76" width="752" height="6" rx="3" fill="#fff" opacity=".05"/>
+
+  <!-- ===== Air ducts (bypass first: the extract duct passes over it) ===== -->
+  ${pipe("a_byp", "M440 190 V112 H790 V470", "duct byp")}
+  ${pipe("a_fresh", "M30 190 H375", "duct")}
+  ${pipe("a_pre", "M375 190 H480 L555 265", "duct")}
+  ${pipe("a_ext", "M1210 190 H760 L685 265", "duct")}
+  ${pipe("a_exh", "M555 395 L480 470 H30", "duct")}
+  ${pipe("a_sup1", "M685 395 L760 470 H830", "duct")}
+  ${pipe("a_sup2", "M830 470 H1210", "duct")}
+
+  <!-- ===== By-pass damper ===== -->
+  <g id="byp" class="clickable" data-e="bypass">
+    <circle cx="615" cy="112" r="22" class="dhouse"/>
+    <g transform="translate(615 112)"><g id="damper"><circle r="20" fill="transparent"/><path d="M-17 0 H17"/><circle r="3.5"/></g></g>
+    <text id="t_byp" class="sub" x="615" y="160" text-anchor="middle"></text>
+  </g>
+
+  <!-- ===== Filters ===== -->
+  <g id="flt_f" class="filter clickable" data-e="filter"><g transform="translate(290 190)">
+    <rect x="-13" y="-30" width="26" height="60" rx="4"/><path class="pleat" d="${pleats}"/></g>
+    <text class="sub" x="290" y="146" text-anchor="middle" id="l_flt_f"></text>
+  </g>
+  <g id="flt_e" class="filter clickable" data-e="filter"><g transform="translate(905 190)">
+    <rect x="-13" y="-30" width="26" height="60" rx="4"/><path class="pleat" d="${pleats}"/></g>
+    <text class="sub" x="905" y="146" text-anchor="middle" id="l_flt_e"></text>
+  </g>
+
+  <!-- ===== Heating coils ===== -->
+  <g id="pre" class="coilbox clickable" data-e="preheater_power">
+    <rect x="355" y="160" width="40" height="60" rx="7"/>
+    <path class="zz" d="M375 164 l9 6 l-18 7 l18 7 l-18 7 l18 7 l-18 7 l18 7 l-9 4"/>
+    <text id="t_pre" class="sub" x="375" y="244" text-anchor="middle"></text>
+  </g>
+  <g id="post" class="coilbox clickable" data-e="heater_power">
+    <rect x="810" y="440" width="40" height="60" rx="7"/>
+    <path class="zz" d="M830 444 l9 6 l-18 7 l18 7 l-18 7 l18 7 l-18 7 l18 7 l-9 4"/>
+    <text id="t_post" class="sub" x="830" y="524" text-anchor="middle"></text>
+  </g>
+
+  <!-- ===== Fans ===== -->
+  <g id="fan_e" class="fanbox clickable" data-e="exhaust_fan">
+    <circle cx="360" cy="470" r="38" fill="url(#gFan)" stroke="#5d6775" stroke-width="2"/>
+    <circle class="ring" cx="360" cy="470" r="38" fill="none" stroke-width="3"/>
+    <g transform="translate(360 470)"><g class="fan" id="fe"><circle r="34" fill="transparent"/>${fanBlades(0.62)}<circle r="7" class="hub"/></g></g>
+    <text id="t_fe" class="lbl" x="360" y="534" text-anchor="middle"></text><text id="r_fe" class="sub" x="360" y="554" text-anchor="middle"></text>
+  </g>
+  <g id="fan_s" class="fanbox clickable" data-e="supply_fan">
+    <circle cx="935" cy="470" r="38" fill="url(#gFan)" stroke="#5d6775" stroke-width="2"/>
+    <circle class="ring" cx="935" cy="470" r="38" fill="none" stroke-width="3"/>
+    <g transform="translate(935 470)"><g class="fan" id="fs"><circle r="34" fill="transparent"/>${fanBlades(0.62)}<circle r="7" class="hub"/></g></g>
+    <text id="t_fs" class="lbl" x="935" y="534" text-anchor="middle"></text><text id="r_fs" class="sub" x="935" y="554" text-anchor="middle"></text>
+  </g>
+
+  <!-- ===== Cross-flow plate exchanger ===== -->
+  <g id="hx" class="clickable" data-e="efficiency">
+    <g transform="translate(${CX} ${CY}) rotate(45)">
+      ${plenum("pl_f", `${-HS},${-HS} ${-HS},${HS} ${-HS - 40},16 ${-HS - 40},-16`)}
+      ${plenum("pl_s", `${HS},${-HS} ${HS},${HS} ${HS + 40},16 ${HS + 40},-16`)}
+      ${plenum("pl_e", `${-HS},${-HS} ${HS},${-HS} 16,${-HS - 40} -16,${-HS - 40}`)}
+      ${plenum("pl_x", `${-HS},${HS} ${HS},${HS} 16,${HS + 40} -16,${HS + 40}`)}
+      <g id="plates">
+        <rect class="hxbg" x="${-HS}" y="${-HS}" width="${HS * 2}" height="${HS * 2}" rx="6"/>
+        <g clip-path="url(#cHx)">
+          <g class="ch ext" id="ch_e"><g class="cb">${ch.ext}</g><g class="cc">${ch.ext}</g><g class="cf">${ch.ext}</g></g>
+          <g class="ch fresh" id="ch_f"><g class="cb">${ch.fresh}</g><g class="cc">${ch.fresh}</g><g class="cf">${ch.fresh}</g></g>
+          <g class="ch ext" id="ch_e2" clip-path="url(#cWeave)"><g class="cb">${ch.ext}</g><g class="cc">${ch.ext}</g><g class="cf">${ch.ext}</g></g>
+          <rect id="hxfrost" x="${-HS}" y="${-HS}" width="${HS * 2}" height="${HS * 2}" fill="#dff1ff"/>
+          <g id="hxice">${frost}</g>
+        </g>
+        <rect class="hxframe" x="${-HS}" y="${-HS}" width="${HS * 2}" height="${HS * 2}" rx="6"/>
+        <path class="hxedge" d="M${-HS} ${-HS + 14} V${-HS} H${-HS + 14} M${HS - 14} ${-HS} H${HS} V${-HS + 14} M${HS} ${HS - 14} V${HS} H${HS - 14} M${-HS + 14} ${HS} H${-HS} V${HS - 14}"/>
+      </g>
+    </g>
+    <g id="rotorg">
+      <circle cx="${CX}" cy="${CY}" r="124" class="rotorbg"/>
+      ${pipe("x_f", "M555 265 L685 395", "duct inner")}
+      ${pipe("x_e", "M685 265 L555 395", "duct inner")}
+      <g transform="translate(${CX} ${CY})"><g id="wheel" class="fan"><circle r="122" fill="transparent"/>
+        <circle r="120" class="rim"/><circle r="90" class="rim thin"/><circle r="58" class="rim thin"/><g class="spokes">${spokes}</g><circle r="26" class="hubr"/></g></g>
+    </g>
+  </g>
+  <text id="t_eff" class="big clickable" data-e="efficiency" x="${CX}" y="506" text-anchor="middle"></text>
+  <text id="l_eff" class="sub" x="${CX}" y="530" text-anchor="middle"></text>
+
+  <!-- ===== Temperatures ===== -->
+  <g class="clickable" data-e="fresh"><text id="l_fresh" class="sub" x="34" y="132"></text><text id="t_fresh" class="big" x="34" y="162"></text></g>
+  <g class="clickable" data-e="exhaust"><text id="t_exh" class="big" x="34" y="524"></text><text id="l_exh" class="sub" x="34" y="548"></text></g>
+  <g class="clickable" data-e="extract"><text id="l_ext" class="sub" x="1206" y="132" text-anchor="end"></text><text id="t_ext" class="big" x="1206" y="162" text-anchor="end"></text></g>
+  <g class="clickable" data-e="supply"><text id="t_sup" class="big" x="1206" y="524" text-anchor="end"></text><text id="l_sup" class="sub" x="1206" y="548" text-anchor="end"></text></g>
+</svg>`;
+}
+
+/* ------------------------------------------------------------------------------------------ */
+/*  Styles                                                                                     */
+/* ------------------------------------------------------------------------------------------ */
+const CSS = `
+:host{display:block}
+ha-card{display:block;overflow:hidden;background:var(--sw-bg,radial-gradient(120% 90% at 30% 0%,#1f232a 0%,#15181c 60%,#121417 100%));
+  color:#e6e9ee;border-radius:var(--ha-card-border-radius,16px);border:1px solid rgba(255,255,255,.06);
+  font-family:var(--ha-font-family-body,var(--paper-font-body1_-_font-family,Roboto,system-ui,sans-serif))}
+.hdr{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:16px 18px 4px;flex-wrap:wrap}
+.name{font-size:17px;font-weight:600;letter-spacing:.2px}
+.subt{font-size:12.5px;color:#9aa3ad;margin-top:2px}
+.chips{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.pill{display:inline-flex;align-items:center;gap:8px;padding:6px 12px 6px 10px;border-radius:999px;font-size:13px;font-weight:600;
+  background:color-mix(in srgb,var(--mc,#7d8794) 16%,transparent);color:var(--mc,#7d8794);border:1px solid color-mix(in srgb,var(--mc,#7d8794) 35%,transparent);transition:all .5s}
+.pill .dot{width:8px;height:8px;border-radius:50%;background:var(--mc,#7d8794)}
+.pill.live .dot{animation:ping 1.8s ease-out infinite}
+@keyframes ping{0%{box-shadow:0 0 0 0 color-mix(in srgb,var(--mc) 70%,transparent)}100%{box-shadow:0 0 0 9px transparent}}
+.badge{font-size:11.5px;font-weight:600;padding:4px 9px;border-radius:999px;background:rgba(255,255,255,.06);color:#c9d1da;border:1px solid rgba(255,255,255,.08);display:none;cursor:pointer}
+.badge.show{display:inline-block}
+.badge.warn{color:#ffcf70;border-color:rgba(255,207,112,.3);background:rgba(255,207,112,.08)}
+.badge.err{color:#ff8a80;border-color:rgba(255,110,100,.35);background:rgba(255,110,100,.1)}
+.badge.ice{color:#bfe3ff;border-color:rgba(191,227,255,.3);background:rgba(191,227,255,.08)}
+.badge.hot{color:#ff9f80;border-color:rgba(255,120,90,.3);background:rgba(255,120,90,.08)}
+.wrap{padding:0 6px}
+svg{width:100%;height:auto;display:block}
+.lbl{fill:#e6e9ee;font-size:19px;font-weight:500}
+.big{fill:#fff;font-size:26px;font-weight:600}
+.sub{fill:#9aa3ad;font-size:14.5px}
+text{paint-order:stroke;stroke:#16191d;stroke-width:4px;stroke-linejoin:round;font-variant-numeric:tabular-nums}
+.clickable{cursor:pointer}
+.clickable:hover{filter:brightness(1.18)}
+.hide{display:none}
+
+/* narrow layout: same drawing, larger text, secondary labels hidden */
+.narrow .lbl{font-size:calc(10.5px * var(--k,2))}.narrow .big{font-size:calc(12px * var(--k,2))}.narrow .sub{font-size:calc(9.5px * var(--k,2))}
+.narrow text{stroke-width:calc(1.6px * var(--k,2))}
+.narrow #l_flt_f,.narrow #l_flt_e,.narrow #t_pre,.narrow #t_post,.narrow #l_eff,.narrow #t_fe,.narrow #t_fs,.narrow #l_out,.narrow #l_house,
+.narrow #outside,.narrow #r_fe,.narrow #r_fs,.narrow #house .housep,.narrow #l_fresh,.narrow #l_exh,.narrow #l_ext,.narrow #l_sup{visibility:hidden}
+.narrow #t_fresh{transform:translateY(-14px)}.narrow #t_ext{transform:translateY(-14px)}
+.narrow #t_exh{transform:translateY(30px)}.narrow #t_sup{transform:translateY(30px)}
+.narrow #t_eff{transform:translateY(14px)}.narrow #t_byp{transform:translateY(8px)}
+.narrow #t_room{transform:translate(-4px,-6px)}
+
+/* ducts (same layered pipes as the Vitocal card, air sized) */
+.pipe path{fill:none;stroke-linecap:round;stroke-linejoin:round}
+.pipe .pb{stroke:#0f1215;stroke-width:13}
+.pipe .pg{stroke:var(--c,transparent);stroke-width:15;opacity:0;transition:opacity .6s,stroke .6s}
+.pipe .pc{stroke:#4a525d;stroke-width:7;transition:stroke .6s}
+.pipe .pf{stroke:rgba(255,255,255,.9);stroke-width:3;stroke-dasharray:2 18;opacity:0}
+.pipe.on .pc{stroke:var(--c)}
+.pipe.on .pg{opacity:.22}
+.pipe.on .pf{opacity:1;animation:flow var(--spd,1.3s) linear infinite}
+.duct .pb{stroke-width:30;stroke-linecap:butt}.duct .pg{stroke-width:36;stroke-linecap:butt}.duct .pc{stroke-width:20;stroke-linecap:butt}
+.duct .pf{stroke-width:4;stroke-dasharray:3 21}
+.duct.on .pf{animation-name:flowd}
+.duct.byp{opacity:var(--bo,1);transition:opacity .8s}
+.duct.byp .pb{stroke-width:22}.duct.byp .pg{stroke-width:26}.duct.byp .pc{stroke-width:13}.duct.byp .pf{stroke-width:3}
+.duct.inner .pb{stroke-width:18}.duct.inner .pc{stroke-width:11}.duct.inner .pg{stroke-width:22}
+@keyframes flow{to{stroke-dashoffset:-20}}
+@keyframes flowd{to{stroke-dashoffset:-24}}
+@keyframes flowc{to{stroke-dashoffset:-16}}
+
+
+/* outside / house */
+.sun{fill:#ffd27a;opacity:.85}
+.cloud{fill:#3a414b;stroke:#68727f;stroke-width:1.6}
+.housep{fill:none;stroke:#9aa3ad;stroke-width:2.4;stroke-linejoin:round;stroke-linecap:round}
+
+/* by-pass damper */
+.dhouse{fill:#1d2228;stroke:#68727f;stroke-width:2.2;transition:stroke .6s}
+#damper{transform-box:fill-box;transform-origin:center;transition:transform .9s cubic-bezier(.4,1.4,.6,1)}
+#damper path{stroke:#c9d1da;stroke-width:4.5;stroke-linecap:round}
+#damper circle:last-child{fill:#c9d1da}
+#byp.open .dhouse{stroke:var(--c,#9be3c0)}
+#byp.open #damper path{stroke:var(--c,#9be3c0)}
+
+/* filters */
+.filter rect{fill:#2b313a;stroke:#7d8794;stroke-width:1.8;transition:stroke .6s,filter .6s}
+.filter .pleat{fill:none;stroke:#7d8794;stroke-width:1.3}
+.filter.due rect{stroke:#ffcf70;filter:drop-shadow(0 0 6px rgba(255,207,112,.6))}
+.filter.due .pleat{stroke:#ffcf70}
+.filter.due .sub{fill:#ffcf70}
+
+/* heating coils */
+.coilbox rect{fill:#1d2228;stroke:#68727f;stroke-width:2;transition:stroke .6s,filter .6s}
+.coilbox .zz{fill:none;stroke:#68727f;stroke-width:2.6;stroke-linejoin:round;stroke-linecap:round;transition:stroke .6s}
+.coilbox.on rect{stroke:var(--hc);filter:drop-shadow(0 0 calc(4px + var(--hp,0) * 10px) var(--hc))}
+.coilbox.on .zz{stroke:var(--hc);animation:glow 1.6s ease-in-out infinite}
+@keyframes glow{0%,100%{opacity:.65}50%{opacity:1}}
+
+/* fans */
+.fan{transform-box:fill-box;transform-origin:center}
+.fanbox .fan path{fill:#59636f;transition:fill .6s}
+.fanbox .hub{fill:#7b8693}
+.fanbox .ring{stroke:var(--fc,transparent);opacity:0;transition:opacity .6s}
+.fanbox.on .fan{animation:spin var(--fspd,1.4s) linear infinite}
+.fanbox.on .fan path{fill:var(--fc)}
+.fanbox.on .hub{fill:#eef6ff}
+.fanbox.on .ring{opacity:.55}
+.fanbox.fault .ring{stroke:#ff6e64;opacity:.9}
+@keyframes spin{to{transform:rotate(360deg)}}
+
+/* plate exchanger */
+.plenum{fill:#1a1e24;stroke:#5d6775;stroke-width:1.6;stroke-linejoin:round}
+.hxbg{fill:url(#gHx)}
+.hxframe{fill:none;stroke:#76808d;stroke-width:3}
+.hxedge{fill:none;stroke:#c9d1da;stroke-width:3.5;stroke-linecap:round;opacity:.55}
+#plates{transition:filter .8s}
+#hx.on #plates{filter:drop-shadow(0 0 14px color-mix(in srgb,var(--glow,#9be3c0) 40%,transparent))}
+.ch path{fill:none}
+.ch .cb path{stroke:#0f1215;stroke-width:10}
+.ch .cc path{stroke-width:5.5;transition:opacity .8s}
+.ch.fresh .cc path{stroke:url(#gFresh)}
+.ch.ext .cc path{stroke:url(#gExt)}
+.ch .cf path{stroke:rgba(255,255,255,.9);stroke-width:2.2;stroke-dasharray:2.5 13.5;opacity:0}
+.ch{opacity:var(--co,1);transition:opacity .8s}
+#hx.on .ch .cf path{opacity:1;animation:flowc var(--spd,1.3s) linear infinite}
+#hx.on .ch.ext .cf path{animation-duration:var(--spde,1.3s)}
+.ch.off .cc path{opacity:.35}
+#hxfrost,#hxice{opacity:0;transition:opacity .8s}
+#hx.defrost #hxfrost{opacity:.2}
+#hx.defrost #hxice{opacity:1}
+.ice{fill:none;stroke:#e8f6ff;stroke-width:2.4;stroke-linecap:round}
+#hx.defrost .ice{animation:twinkle 2.4s ease-in-out infinite}
+@keyframes twinkle{0%,100%{opacity:.35}50%{opacity:1}}
+
+/* rotary exchanger (R series) */
+#rotorg{display:none}
+#hx.rotor #rotorg{display:inline}
+#hx.rotor #plates,#hx.rotor .plenum{display:none}
+.rotorbg{fill:#1d2228;stroke:#76808d;stroke-width:3}
+.rim{fill:none;stroke:#8a96a3;stroke-width:3}.rim.thin{stroke-width:1.4;opacity:.6}
+.spokes path{stroke:#68727f;stroke-width:1.6}
+.hubr{fill:#2b313a;stroke:#9aa5b1;stroke-width:2}
+#wheel{opacity:.85}
+#hx.rotor.spin #wheel{animation:spin var(--rspd,4s) linear infinite}
+
+/* controls */
+.ctl{display:flex;flex-wrap:wrap;gap:8px;align-items:center;justify-content:space-between;padding:2px 14px 10px}
+.seg{display:flex;gap:4px;padding:4px;border-radius:14px;background:rgba(255,255,255,.035);border:1px solid rgba(255,255,255,.06);flex-wrap:wrap}
+.mb{display:inline-flex;align-items:center;gap:6px;border:0;border-radius:10px;padding:7px 11px;font:inherit;font-size:13px;font-weight:600;
+  color:#9aa3ad;background:transparent;cursor:pointer;transition:background .25s,color .25s}
+.mb ha-icon{--mdc-icon-size:18px}
+.mb:hover{background:rgba(255,255,255,.06);color:#e6e9ee}
+.mb.act{color:var(--mc);background:color-mix(in srgb,var(--mc) 18%,transparent);box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--mc) 40%,transparent)}
+.mb.busy{opacity:.55;pointer-events:none}
+.mb.fire.act{--mc:#ff8a3d}
+.alerts{display:flex;flex-wrap:wrap;gap:8px;padding:0 14px 10px}
+.alert{display:flex;align-items:center;gap:10px;font-size:13px;padding:8px 10px 8px 12px;border-radius:12px;flex:1 1 220px;
+  background:rgba(255,207,112,.08);border:1px solid rgba(255,207,112,.25);color:#ffcf70}
+.alert.err{background:rgba(255,110,100,.1);border-color:rgba(255,110,100,.3);color:#ff8a80}
+.alert span{flex:1}
+.alert button{border:0;border-radius:8px;padding:5px 10px;font:inherit;font-size:12.5px;font-weight:600;cursor:pointer;color:inherit;background:currentColor}
+.alert button:disabled{opacity:.5}
+.alert button b{color:#16191d}
+
+/* tiles */
+.tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(118px,1fr));gap:8px;padding:4px 14px 14px}
+.tile{background:rgba(255,255,255,.035);border:1px solid rgba(255,255,255,.06);border-radius:12px;padding:10px 12px;cursor:pointer;transition:background .2s;min-width:0}
+.tile:hover{background:rgba(255,255,255,.07)}
+.tl{font-size:11.5px;color:#9aa3ad;text-transform:uppercase;letter-spacing:.6px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.tv{font-size:21px;font-weight:600;margin-top:3px;font-variant-numeric:tabular-nums;white-space:nowrap}
+.tv small{font-size:12.5px;font-weight:500;color:#9aa3ad;margin-left:2px}
+.ts{font-size:11.5px;color:#7f8994;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.bar{height:4px;border-radius:2px;background:rgba(255,255,255,.08);margin-top:6px;overflow:hidden}
+.bar i{display:block;height:100%;width:0;border-radius:2px;background:var(--bc,linear-gradient(90deg,#ff6b3d,#ffd54f,#6fdc8c));transition:width .8s}
+.narrow .tiles{grid-template-columns:repeat(3,1fr);padding:4px 10px 12px}.narrow .tv{font-size:18px}.narrow .tile{padding:8px 10px}
+.vnarrow .tiles{grid-template-columns:repeat(2,1fr)}
+.narrow .mb span{display:none}.narrow .mb{padding:8px 10px}
+.empty{padding:16px 18px;color:#9aa3ad}
+@media (prefers-reduced-motion: reduce){*{animation-duration:0s!important;animation-iteration-count:1!important}}
+`;
+
+/* ------------------------------------------------------------------------------------------ */
+/*  Card                                                                                       */
+/* ------------------------------------------------------------------------------------------ */
 class SwegonCasaCard extends HTMLElement {
-  static getStubConfig() {
-    return {};
-  }
+  static getStubConfig() { return {}; }
 
   setConfig(config) {
-    this._config = config || {};
-    this._busy = null;
-    if (!this.shadowRoot) this.attachShadow({ mode: "open" });
-    this._sig = null;
-  }
-
-  getCardSize() {
-    return 8;
-  }
-
-  getGridOptions() {
-    return { columns: 12, min_columns: 6, rows: "auto" };
+    this._config = Object.assign({ show_header: true, show_controls: true, show_stats: true, entities: {} }, config || {});
+    this._map = null;
+    if (this.shadowRoot) this._applyLayout();
   }
 
   set hass(hass) {
+    const first = !this._hass;
     this._hass = hass;
-    this._map = this._find();
-    const ids = Object.values(this._map);
-    const sig = JSON.stringify([ids.map((id) => [id, hass.states[id]?.state, hass.states[id]?.last_updated]), this._busy, hass.language]);
-    if (sig === this._sig) return;
-    this._sig = sig;
-    this._render();
+    if (!this.shadowRoot) this._build();
+    if (first || hass.entities !== this._entsRef) { this._map = null; this._entsRef = hass.entities; }
+    this._update();
   }
+
+  getCardSize() { return 9; }
+  getGridOptions() { return { columns: 12, min_columns: 6 }; }
 
   _t() {
-    const lang = (this._hass?.locale?.language || this._hass?.language || "en").slice(0, 2);
-    const base = T[lang] || T.en;
-    return { ...T.en, ...base, alarms: { ...T.fr.alarms, ...(base.alarms || {}) } };
+    const lang = ((this._hass && ((this._hass.locale && this._hass.locale.language) || this._hass.language)) || "fr").slice(0, 2);
+    return T[lang] || T.en;
   }
 
-  _find() {
-    const mine = Object.values(this._hass?.entities || {}).filter((e) => e.platform === DOMAIN);
-    const deviceId = this._config.device_id || mine[0]?.device_id;
-    const map = {};
-    for (const e of mine) {
-      if (e.device_id !== deviceId || !e.translation_key) continue;
-      map[`${e.entity_id.split(".")[0]}.${e.translation_key}`] = e.entity_id;
-    }
-    this._deviceId = deviceId;
-    return map;
-  }
-
-  _s(key) {
-    const id = this._map[key];
-    return id ? this._hass.states[id] : undefined;
-  }
-
-  _n(key) {
-    const v = parseFloat(this._s(key)?.state);
-    return Number.isFinite(v) ? v : null;
-  }
-
-  _on(key) {
-    return this._s(key)?.state === "on";
-  }
-
-  _fmt(v, digits = 0, unit = "") {
-    if (v === null || v === undefined) return "–";
-    const locale = this._hass?.locale?.language || this._hass?.language || "fr";
-    return new Intl.NumberFormat(locale, { minimumFractionDigits: digits, maximumFractionDigits: digits }).format(v) + unit;
-  }
-
-  _name() {
-    if (this._config.title) return this._config.title;
-    const d = this._hass?.devices?.[this._deviceId];
-    return d?.name_by_user || d?.name || "Swegon CASA";
-  }
-
-  _exchangerType() {
-    if (this._config.exchanger) return this._config.exchanger;
-    if (this._map["binary_sensor.rotor_active"] || this._map["sensor.rotor_rpm"]) return "rotor";
-    const model = this._hass?.devices?.[this._deviceId]?.model || "";
-    return /\bR\d/i.test(model) ? "rotor" : "plate";
-  }
-
-  _bypassPct() {
-    const auto = this._n("sensor.bypass_position");
-    if (auto !== null) return Math.max(0, Math.min(100, auto));
-    const manual = this._s("sensor.manual_bypass")?.state;
-    if (manual === "open") return 100;
-    if (manual === "closed") return 0;
-    return null;
-  }
-
-  _coil(x, y, label, power, active, cooling) {
-    // A finned battery across the duct; red when heating, blue when cooling.
-    const tone = cooling ? "cool" : active || (power ?? 0) > 0 ? "heat" : "idle";
-    const fins = Array.from({ length: 5 }, (_, i) => `<line x1="${x - 7}" y1="${y - 13 + i * 6.5}" x2="${x + 7}" y2="${y - 13 + i * 6.5}"/>`).join("");
-    return `
-      <g class="coil ${tone}">
-        <rect x="${x - 8}" y="${y - 16}" width="16" height="32" rx="3"/>
-        <g class="fins">${fins}</g>
-        <text class="coil-label" x="${x}" y="${y + 30}" text-anchor="middle">${esc(label)}</text>
-        ${power !== null && power !== undefined ? `<text class="coil-value" x="${x}" y="${y + 41}" text-anchor="middle">${this._fmt(power, 0, " %")}</text>` : ""}
-      </g>`;
-  }
-
-  _diagram(t) {
-    const fresh = this._n("sensor.fresh_air_temperature");
-    const supply = this._n("sensor.supply_air_temperature");
-    const extract = this._n("sensor.extract_air_temperature");
-    const exhaust = this._n("sensor.exhaust_air_temperature");
-    const supplyPct = this._n("sensor.supply_fan_control") ?? 0;
-    const exhaustPct = this._n("sensor.exhaust_fan_control") ?? 0;
-    const type = this._exchangerType();
-    const rotorOn = this._on("binary_sensor.rotor_active");
-    const defrost = this._on("binary_sensor.defrost");
-    const bypass = this._bypassPct();
-    const running = (this._s("fan.ventilation")?.state ?? "on") === "on" && (supplyPct > 0 || exhaustPct > 0);
-    const dur = (pct) => Math.max(0.5, 3.2 - pct / 40).toFixed(2);
-    const air = (cls, d, pct, opacity = 1) =>
-      `<path class="air ${cls} ${running && pct > 0 ? "flowing" : ""}" d="${d}" style="opacity:${opacity.toFixed(2)};animation-duration:${dur(pct)}s"/>`;
-    const tag = (x, y, label, value, cls, anchor = "start") => `
-      <g class="tag ${cls}" transform="translate(${x} ${y})" text-anchor="${anchor}">
-        <text class="tag-label" y="-6">${esc(label)}</text>
-        <text class="tag-value" y="14">${value === null ? "–" : this._fmt(value, 1, " °C")}</text>
-      </g>`;
-    const fan = (x, y, pct) => `
-      <g transform="translate(${x} ${y})">
-        <g class="fan-icon ${running && pct > 0 ? "spinning" : ""}" style="animation-duration:${dur(pct)}s">
-          <path transform="translate(-10 -10) scale(0.84)" fill="currentColor" d="${ICON.fan}"/>
-        </g>
-      </g>`;
-
-    // Air path through the exchanger, and around it when the bypass opens.
-    const share = bypass === null ? 0 : bypass / 100;
-    const freshThrough = "M152 62 Q 162 62 168 104 L 232 104 Q 238 62 248 62";
-    const extractThrough = "M248 168 Q 238 168 232 126 L 168 126 Q 162 168 152 168";
-    const exchanger =
-      type === "rotor"
-        ? `<g transform="translate(200 115)">
-             <g class="rotor ${rotorOn ? "spinning" : ""} ${defrost ? "defrost" : ""}">
-               <circle r="34" class="rotor-ring"/>
-               ${Array.from({ length: 12 }, (_, i) => `<line x1="0" y1="0" x2="${(32 * Math.cos((i * Math.PI) / 6)).toFixed(1)}" y2="${(32 * Math.sin((i * Math.PI) / 6)).toFixed(1)}" class="rotor-spoke"/>`).join("")}
-               <circle r="6" class="rotor-hub"/>
-             </g>
-           </g>`
-        : `<g class="plates ${defrost ? "defrost" : ""}">
-             <polygon points="160,115 174,90 226,90 240,115 226,140 174,140" class="plate-body"/>
-             ${Array.from({ length: 7 }, (_, i) => `<line x1="${170 - (i % 2)}" y1="${94 + i * 7}" x2="${230 + (i % 2)}" y2="${94 + i * 7}" class="plate-line ${i % 2 ? "warm" : "cold"}"/>`).join("")}
-           </g>`;
-    const damperAngle = bypass === null ? 90 : 90 - bypass * 0.9; // 90° = closed across the channel
-    const bypassDrawing =
-      bypass === null
-        ? ""
-        : `<path class="bypass-channel" d="M152 62 H248"/>
-           ${air("cold", "M152 62 H248", supplyPct, share)}
-           <g transform="translate(200 62)">
-             <line class="damper" x1="0" y1="-9" x2="0" y2="9" transform="rotate(${(damperAngle - 90).toFixed(1)})"/>
-             <circle r="2.5" class="damper-pivot"/>
-           </g>
-           <text class="bypass-label" x="200" y="46" text-anchor="middle">${esc(t.bypass)} ${this._fmt(bypass, 0, " %")}</text>`;
-
-    const pre = this._map["sensor.preheater_power"] || this._map["binary_sensor.preheater_active"];
-    const post = this._map["sensor.supply_control_power"];
-    const preCoil = pre ? this._coil(130, 62, t.preheater, this._n("sensor.preheater_power"), this._on("binary_sensor.preheater_active"), false) : "";
-    const postCoil = post ? this._coil(262, 62, t.postheater, this._n("sensor.supply_control_power"), false, this._on("binary_sensor.cooling_active")) : "";
-
-    return `
-      <svg class="diagram" viewBox="0 0 400 240" role="img" aria-label="CASA">
-        <text class="side" transform="translate(12 115) rotate(-90)" text-anchor="middle">${esc(t.outside)}</text>
-        <text class="side" transform="translate(390 115) rotate(90)" text-anchor="middle">${esc(t.house)}</text>
-        <path class="duct cold" d="M30 62 H110"/>${air("cold", "M30 62 H110", supplyPct)}
-        <path class="duct warm" d="M290 62 H370"/>${air("warm", "M290 62 H370", supplyPct)}
-        <path class="arrow warm" d="M364 54 L376 62 L364 70"/>
-        <path class="duct hot" d="M370 168 H290"/>${air("hot", "M370 168 H290", exhaustPct)}
-        <path class="duct used" d="M110 168 H30"/>${air("used", "M110 168 H30", exhaustPct)}
-        <path class="arrow used" d="M36 160 L24 168 L36 176"/>
-        <rect class="unit" x="110" y="28" width="180" height="176" rx="16"/>
-        <!-- internal ducts -->
-        <path class="inner cold" d="M110 62 H152"/>${air("cold", "M110 62 H152", supplyPct)}
-        <path class="inner warm" d="M248 62 H290"/>${air("warm", "M248 62 H290", supplyPct)}
-        <path class="inner hot" d="M290 168 H248"/>${air("hot", "M290 168 H248", exhaustPct)}
-        <path class="inner used" d="M152 168 H110"/>${air("used", "M152 168 H110", exhaustPct)}
-        <path class="inner cold" d="${freshThrough}"/>${air("cold", freshThrough, supplyPct, 1 - share * 0.85)}
-        <path class="inner hot" d="${extractThrough}"/>${air("hot", extractThrough, exhaustPct)}
-        ${exchanger}
-        ${bypassDrawing}
-        ${preCoil}
-        ${postCoil}
-        ${fan(276, 42, supplyPct)}
-        ${fan(124, 188, exhaustPct)}
-        ${tag(34, 38, t.fresh, fresh, "cold")}
-        ${tag(366, 38, t.supply, supply, "warm", "end")}
-        ${tag(366, 196, t.extract, extract, "hot", "end")}
-        ${tag(34, 196, t.exhaust, exhaust, "used")}
-      </svg>`;
-  }
-
-  _quality(t) {
-    const co2 = this._n("sensor.co2");
-    const rh = this._n("sensor.humidity");
-    const voc = this._n("sensor.voc");
-    const room = this._n("sensor.room_temperature");
-    const level = (v, a, b) => (v === null ? "" : v < a ? "good" : v < b ? "fair" : "poor");
-    const chip = (label, value, cls) => `<div class="chip ${cls}"><span class="chip-label">${esc(label)}</span><span class="chip-value">${value}</span></div>`;
-    const chips = [];
-    if (room !== null) chips.push(chip(t.room, this._fmt(room, 1, " °C"), ""));
-    if (co2 !== null) chips.push(chip(t.co2, this._fmt(co2, 0, " ppm"), level(co2, 800, 1200)));
-    if (rh !== null) chips.push(chip(t.humidity, this._fmt(rh, 0, " %"), rh < 30 || rh > 70 ? "fair" : "good"));
-    if (voc !== null) chips.push(chip(t.voc, this._fmt(voc, 0, " ppm"), level(voc, 500, 1000)));
-    return chips.length ? `<div class="chips">${chips.join("")}</div>` : "";
-  }
-
-  _render() {
+  /* ---------- build ---------- */
+  _build() {
+    const root = this.attachShadow({ mode: "open" });
     const t = this._t();
-    const root = this.shadowRoot;
-    if (!this._hass) return;
-    if (!Object.keys(this._map).length) {
-      root.innerHTML = `<ha-card><div class="empty">${t.notFound}</div></ha-card>`;
-      return;
-    }
-    const modeSel = this._s("select.operating_mode");
-    const mode = modeSel?.state;
-    const unitState = this._s("sensor.unit_state")?.state;
-    const unavailable = !modeSel || modeSel.state === "unavailable";
-    const alarm = this._on("binary_sensor.alarm");
-    const alarms = this._s("binary_sensor.alarm")?.attributes?.alarms || [];
-    const filter = this._on("binary_sensor.filter_info");
-    const service = this._on("binary_sensor.service_info");
-    const realAlarms = alarms.filter((a) => !["filter_guard", "service"].includes(a));
-    const pill = unavailable
-      ? { cls: "error", text: t.unavailable }
-      : realAlarms.length
-        ? { cls: "error", text: t.alarm }
-        : { cls: unitState === "normal" ? "ok" : "idle", text: t.states[unitState] || unitState || "–" };
-    const eff = this._n("sensor.heat_recovery_efficiency");
-    const supFlow = this._n("sensor.supply_airflow");
-    const exFlow = this._n("sensor.exhaust_airflow");
-    const supPct = this._n("sensor.supply_fan_control");
-    const exPct = this._n("sensor.exhaust_fan_control");
-    const hours = this._n("sensor.hours_to_service");
-    const fireplace = this._s("switch.fireplace");
-    const nightCooling = this._on("binary_sensor.summer_cooling_active");
-    const modes = ["stopped", "away", "home", "boost", "travelling"];
-
+    const modeBtns = MODE_KEYS.map((m) =>
+      `<button class="mb" data-mode="${m}" style="--mc:${MODES[m].color}" title="${esc(t.modes[m])}"><ha-icon icon="${MODES[m].icon}"></ha-icon><span>${esc(t.modes[m])}</span></button>`).join("");
     root.innerHTML = `
-      <style>${STYLE}</style>
+      <style>${CSS}</style>
       <ha-card>
-        <div class="header">
-          <div class="title">${esc(this._name())}</div>
-          <div class="pill ${pill.cls}"><span class="dot"></span>${esc(pill.text)}</div>
+        <div class="hdr" id="hdr">
+          <div><div class="name" id="h_name"></div><div class="subt" id="h_sub"></div></div>
+          <div class="chips">
+            <span class="badge err" id="b_alarm" data-e="alarm"></span>
+            <span class="badge warn" id="b_filter" data-e="filter"></span>
+            <span class="badge warn" id="b_service" data-e="service"></span>
+            <span class="badge hot" id="b_fire" data-e="fireplace"></span>
+            <span class="badge ice" id="b_night" data-e="night_cooling"></span>
+            <span class="badge ice" id="b_defrost" data-e="defrost"></span>
+            <span class="pill" id="h_mode" data-e="ventilation"><span class="dot"></span><span id="h_mode_t">—</span></span>
+          </div>
         </div>
-        ${realAlarms.length ? `<div class="banner error">${icon("alert")} ${realAlarms.map((a) => esc(t.alarms[a] || a)).join(" · ")}</div>` : ""}
-        ${filter || service ? `<div class="banner warn">${icon("wrench")} <span>${[filter ? t.filter : "", service ? t.service : ""].filter(Boolean).join(" · ")}</span>
-          ${this._map[filter ? "button.confirm_filter" : "button.confirm_service"] ? `<button class="link" data-press="${filter ? "button.confirm_filter" : "button.confirm_service"}">${t.confirm}</button>` : ""}</div>` : ""}
-        ${this._diagram(t)}
-        <div class="stats">
-          <div><span class="stat-label">${t.efficiency}</span><span class="stat-value">${this._fmt(eff, 0, " %")}</span></div>
-          <div><span class="stat-label">${t.airflow}</span><span class="stat-value">${supFlow !== null ? `${this._fmt(supFlow * 3.6, 0)} / ${this._fmt((exFlow ?? 0) * 3.6, 0)} m³/h` : "–"}</span></div>
-          <div><span class="stat-label">${t.fans}</span><span class="stat-value">${supPct !== null ? `${this._fmt(supPct, 0)} / ${this._fmt(exPct, 0)} %` : "–"}</span></div>
+        <div class="empty hide" id="empty"></div>
+        <div class="wrap" id="diagram">${buildSVG()}</div>
+        <div class="ctl" id="ctl">
+          <div class="seg" id="seg">${modeBtns}</div>
+          <div class="seg" id="seg2"><button class="mb fire" id="btn_fire"><ha-icon icon="mdi:fireplace"></ha-icon><span>${esc(t.fireplace)}</span></button></div>
         </div>
-        <div class="modes" role="radiogroup">
-          ${modes.map((m) => `<button class="mode ${mode === m ? "active" : ""} ${m}" data-mode="${m}" ${modeSel && !unavailable && this._busy !== "mode" ? "" : "disabled"} role="radio" aria-checked="${mode === m}">${esc(t.modes[m])}</button>`).join("")}
-        </div>
-        ${this._quality(t)}
-        <div class="footer">
-          ${fireplace ? `<button class="toggle ${fireplace.state === "on" ? "on" : ""}" data-toggle="switch.fireplace" ${this._busy === "switch.fireplace" ? "disabled" : ""}>${icon("fire", 16)} ${t.fireplace}</button>` : ""}
-          ${nightCooling ? `<span class="badge">${icon("moon", 14)} ${t.nightCooling} ${t.active}</span>` : ""}
-          ${hours !== null ? `<span class="muted">${t.serviceIn(this._fmt(hours, 0))}</span>` : ""}
+        <div class="alerts" id="alerts"></div>
+        <div class="tiles" id="tiles">
+          <div class="tile" data-e="efficiency" id="k_eff_w"><div class="tl">${esc(t.efficiency)}</div><div class="tv" id="k_eff">—</div><div class="bar"><i id="k_eff_b"></i></div></div>
+          <div class="tile" data-e="supply_flow" id="k_flow_w"><div class="tl">${esc(t.airflow)}</div><div class="tv" id="k_flow">—</div><div class="ts" id="k_flow_s"></div></div>
+          <div class="tile" data-e="supply_fan" id="k_fans_w"><div class="tl">${esc(t.fans)}</div><div class="tv" id="k_fans">—</div><div class="ts" id="k_fans_s"></div></div>
+          <div class="tile" data-e="co2" id="k_co2_w"><div class="tl">${esc(t.co2)}</div><div class="tv" id="k_co2">—</div><div class="bar"><i id="k_co2_b"></i></div></div>
+          <div class="tile" data-e="humidity" id="k_hum_w"><div class="tl">${esc(t.humidity)}</div><div class="tv" id="k_hum">—</div><div class="ts" id="k_hum_s"></div></div>
+          <div class="tile" data-e="voc" id="k_voc_w"><div class="tl">${esc(t.voc)}</div><div class="tv" id="k_voc">—</div><div class="ts" id="k_voc_s"></div></div>
+          <div class="tile" data-e="hours_service" id="k_srv_w"><div class="tl">${esc(t.service)}</div><div class="tv" id="k_srv">—</div><div class="ts" id="k_srv_s"></div></div>
         </div>
       </ha-card>`;
 
-    root.querySelectorAll("[data-mode]").forEach((el) => el.addEventListener("click", () => this._setMode(el.dataset.mode)));
-    root.querySelectorAll("[data-toggle]").forEach((el) => el.addEventListener("click", () => this._toggle(el.dataset.toggle)));
-    root.querySelectorAll("[data-press]").forEach((el) => el.addEventListener("click", () => this._press(el.dataset.press)));
-    root.querySelector(".diagram")?.addEventListener("click", () => this._more("sensor.supply_air_temperature"));
-  }
-
-  async _run(key, call) {
-    this._busy = key;
-    this._sig = null;
-    this._render();
-    try {
-      await call();
-    } catch (err) {
-      this.dispatchEvent(new CustomEvent("hass-notification", { detail: { message: err?.message || String(err) }, bubbles: true, composed: true }));
-    } finally {
-      this._busy = null;
-      this._sig = null;
-      if (this._hass) this.hass = this._hass;
+    root.addEventListener("click", (ev) => {
+      const path = ev.composedPath();
+      const btn = path.find((n) => n.dataset && (n.dataset.mode || n.dataset.press));
+      if (btn) { btn.dataset.mode ? this._setMode(btn.dataset.mode) : this._press(btn.dataset.press); return; }
+      if (path.some((n) => n.id === "btn_fire")) { this._toggleFireplace(); return; }
+      const el = path.find((n) => n.dataset && n.dataset.e);
+      if (!el) return;
+      const id = this._eid(el.dataset.e) || (el.dataset.e === "ventilation" ? this._eid("mode") : null);
+      if (id) this.dispatchEvent(new CustomEvent("hass-more-info", { detail: { entityId: id }, bubbles: true, composed: true }));
+    });
+    this._applyLayout();
+    const card = root.querySelector("ha-card");
+    if (window.ResizeObserver) {
+      this._ro = new ResizeObserver((ent) => {
+        const w = ent[0].contentRect.width;
+        const narrow = w > 0 && w < 640;
+        card.classList.toggle("narrow", narrow);
+        card.classList.toggle("vnarrow", w > 0 && w < 360);
+        card.style.setProperty("--k", (1240 / Math.max(w - 12, 200)).toFixed(3));
+        if (narrow !== this._narrow) { this._narrow = narrow; this._update(); }
+      });
+      this._ro.observe(card);
     }
   }
 
-  _setMode(option) {
-    const id = this._map["select.operating_mode"];
-    if (!id || this._hass.states[id]?.state === option) return;
-    this._run("mode", () => this._hass.callService("select", "select_option", { entity_id: id, option }));
+  _applyLayout() {
+    const r = this.shadowRoot;
+    if (!r) return;
+    const show = (id, on) => { const el = r.getElementById(id); if (el) el.style.display = on ? "" : "none"; };
+    show("hdr", this._config.show_header !== false);
+    show("ctl", this._config.show_controls !== false);
+    show("tiles", this._config.show_stats !== false);
   }
 
-  _toggle(key) {
-    const id = this._map[key];
-    if (!id) return;
-    const on = this._hass.states[id]?.state === "on";
-    this._run(key, () => this._hass.callService("switch", on ? "turn_off" : "turn_on", { entity_id: id }));
+  /* ---------- entity resolution ---------- */
+  _resolveAll() {
+    const hass = this._hass, cfg = this._config.entities || {}, map = {};
+    const disc = {};
+    let deviceId = this._config.device_id;
+    if (hass.entities) {
+      const mine = Object.values(hass.entities).filter((e) => e.platform === DOMAIN);
+      if (!deviceId) deviceId = (mine.find((e) => e.translation_key === "fresh_air_temperature") || mine[0] || {}).device_id;
+      for (const e of mine) {
+        if (deviceId && e.device_id !== deviceId) continue;
+        const dom = e.entity_id.split(".")[0];
+        const k = e.translation_key ? `${dom}:${e.translation_key}` : dom;
+        (disc[k] = disc[k] || []).push(e.entity_id);
+      }
+    }
+    this._deviceId = deviceId;
+    const exists = (id) => id && hass.states[id] !== undefined;
+    for (const k of new Set([...Object.keys(DISCOVERY), ...Object.keys(cfg)])) {
+      if (k in cfg) { map[k] = cfg[k] || null; continue; } // explicit override; null / false hides it
+      const d = DISCOVERY[k];
+      let found = null;
+      if (d && !d[1]) found = (disc[d[0]] || []).find(exists);
+      else if (d) for (const tk of d[1]) { found = (disc[`${d[0]}:${tk}`] || []).find(exists); if (found) break; }
+      map[k] = found || null;
+    }
+    this._map = map;
+  }
+  _eid(k) { if (!this._map) this._resolveAll(); return this._map[k] || null; }
+  _st(k) { const id = this._eid(k); return id ? this._hass.states[id] : undefined; }
+  _has(k) { return !!this._st(k); }
+  _s(k) { const s = this._st(k); return s && s.state !== "unavailable" && s.state !== "unknown" ? s.state : null; }
+  _n(k) { const v = parseFloat(this._s(k)); return isNaN(v) ? null : v; }
+  _on(k) { const s = this._s(k); return s === "on" || s === "open" || s === "true"; }
+  _unit(k) { const s = this._st(k); return (s && s.attributes.unit_of_measurement) || ""; }
+
+  _f(v, d = 1) {
+    if (v == null || isNaN(v)) return null;
+    const lang = (this._hass.locale && this._hass.locale.language) || this._hass.language || "fr";
+    this._fmts = this._fmts || {};
+    const key = lang + d;
+    if (!this._fmts[key]) this._fmts[key] = new Intl.NumberFormat(lang, { minimumFractionDigits: d, maximumFractionDigits: d });
+    return this._fmts[key].format(v);
+  }
+  _deg() { return this._narrow ? "°" : " °C"; }
+  _T(k) { const v = this._n(k); return v == null ? null : `${this._f(v, 1)}${this._deg()}`; }
+
+  /* ---------- DOM helpers ---------- */
+  _$(id) { return this.shadowRoot.getElementById(id); }
+  _txt(id, t) { const el = this._$(id); if (!el) return; if (t == null || t === "") el.style.display = "none"; else { el.style.display = ""; if (el.textContent !== t) el.textContent = t; } }
+  _html(id, h) { const el = this._$(id); if (el && el.innerHTML !== h) el.innerHTML = h; }
+  _cls(id, cls, on) { const el = this._$(id); if (el) el.classList.toggle(cls, !!on); }
+  _var(id, name, val) { const el = this._$(id); if (el) el.style.setProperty(name, val); }
+  _show(id, on) { const el = this._$(id); if (el) el.style.display = on ? "" : "none"; }
+  _pipe(id, on, color, spd) {
+    const el = this._$(id); if (!el) return;
+    el.classList.toggle("on", !!on);
+    if (color) el.style.setProperty("--c", color);
+    if (spd) el.style.setProperty("--spd", spd);
+  }
+
+  /* ---------- computed state (shared with the mini card) ---------- */
+  _mode() {
+    // Accept the integration's option keys and raw numbers (YAML modbus: 0 = stopped ... 4 = travelling).
+    for (const k of ["ventilation", "mode"]) {
+      const v = this._s(k);
+      if (v == null) continue;
+      if (MODES[v]) return v;
+      if (/^\d+$/.test(v) && MODE_KEYS[+v]) return MODE_KEYS[+v];
+    }
+    const fan = this._st("fan");
+    if (fan) return fan.state === "off" ? "stopped" : MODES[fan.attributes.preset_mode] ? fan.attributes.preset_mode : "home";
+    return null;
+  }
+
+  _computeState() {
+    const mode = this._mode();
+    const unitState = this._s("unit_state");
+    const sf = this._n("supply_fan"), ef = this._n("exhaust_fan");
+    const sr = this._n("supply_rpm"), er = this._n("exhaust_rpm");
+    const avail = ["fresh", "supply", "extract", "exhaust"].some((k) => this._s(k) != null);
+    let running;
+    if (sf != null || ef != null) running = (sf || 0) > 0 || (ef || 0) > 0;
+    else if (sr != null || er != null) running = (sr || 0) > 0 || (er || 0) > 0;
+    else running = mode != null && mode !== "stopped" && !["external_stop", "user_stopped"].includes(unitState);
+    const sOn = running && (sf == null ? (sr == null || sr > 0) : sf > 0);
+    const eOn = running && (ef == null ? (er == null || er > 0) : ef > 0);
+    const spd = (pct) => `${clamp(2.3 - (pct == null ? 50 : pct) * 0.018, 0.55, 2.3).toFixed(2)}s`;
+
+    let bypass = this._n("bypass");
+    if (bypass == null && this._s("bypass_manual") != null) {
+      const v = this._s("bypass_manual");
+      bypass = v === "open" || v === "on" || v === "1" ? 100 : 0;
+    }
+    const fresh = this._n("fresh"), supply = this._n("supply"), extract = this._n("extract"), exhaust = this._n("exhaust");
+    const preT = this._n("preheater_temp");
+    const supPre = this._n("supply_pre");
+    let eff = this._n("efficiency");
+    if (eff == null && running && fresh != null && supply != null && extract != null && Math.abs(extract - fresh) >= 2) {
+      eff = clamp(((supply - fresh) / (extract - fresh)) * 100, 0, 100);
+    }
+    const rotor = this._config.exchanger ? this._config.exchanger === "rotor" : this._has("rotor") || this._has("rotor_rpm");
+    return { mode, unitState, avail, running, sOn, eOn, sf, ef, sr, er, spd, bypass, fresh, supply, extract, exhaust, preT, supPre, eff, rotor };
+  }
+
+  /* ---------- update ---------- */
+  _update() {
+    if (!this._hass || !this.shadowRoot) return;
+    if (!this._map) this._resolveAll();
+    const t = this._t();
+    const S = this._computeState();
+    const found = Object.values(this._map).some(Boolean);
+    this._show("empty", !found);
+    this._txt("empty", found ? null : t.notFound);
+    this._show("diagram", found);
+    if (!found) return;
+
+    this._updateHeader(t, S);
+    this._updateDiagram(t, S);
+    if (this._config.show_controls !== false) this._updateControls(t, S);
+    if (this._config.show_stats !== false) this._updateTiles(t, S);
+  }
+
+  _deviceName() {
+    const dev = this._deviceId && this._hass.devices && this._hass.devices[this._deviceId];
+    return (dev && (dev.name_by_user || dev.name)) || "Swegon CASA";
+  }
+
+  _updateHeader(t, S) {
+    const { mode, unitState, avail } = S;
+    this._txt("h_name", this._config.title || this._deviceName());
+    const pill = this._$("h_mode");
+    let label, color, live;
+    if (!avail) { label = t.unreachable; color = "#ff8a80"; live = false; }
+    else if (unitState && unitState !== "normal" && t.states[unitState]) {
+      label = t.states[unitState]; color = unitState === "starting" ? "#ffd27a" : "#7d8794"; live = unitState === "starting";
+    } else {
+      label = mode ? t.modes[mode] : "—"; color = mode ? MODES[mode].color : "#7d8794"; live = mode && mode !== "stopped";
+      const left = this._n("boost_left");
+      if (mode === "boost" && left) label += ` · ${this._f(left, 0)} min`;
+    }
+    pill.style.setProperty("--mc", color);
+    pill.classList.toggle("live", !!live);
+    this._txt("h_mode_t", label);
+
+    const sub = [];
+    if (unitState && t.states[unitState] && unitState === "normal") sub.push(t.states[unitState]);
+    if (this._on("week_timer")) sub.push(t.weekTimer);
+    sub.push(S.rotor ? t.rotor : t.plates);
+    this._txt("h_sub", sub.join(" · "));
+
+    const alarms = this._alarms();
+    const b = (id, on, txt) => { this._cls(id, "show", on); if (on) this._txt(id, txt); };
+    b("b_alarm", alarms.length > 0, alarms.length === 1 ? (t.alarms[alarms[0]] || alarms[0]) : `${t.alarm} · ${alarms.length}`);
+    b("b_filter", this._on("filter"), t.filterDue);
+    b("b_service", this._on("service"), t.serviceDue);
+    b("b_fire", this._on("fireplace"), t.fireplace);
+    b("b_night", this._on("night_cooling"), t.nightCooling);
+    b("b_defrost", this._on("defrost"), t.defrost);
+  }
+
+  _alarms() {
+    const st = this._st("alarm");
+    if (!st || st.state !== "on") return [];
+    const list = (st.attributes.alarms || []).filter((a) => a !== "filter_guard" && a !== "service");
+    return list.length || (st.attributes.alarms || []).length ? list : ["alarm"];
+  }
+
+  _updateDiagram(t, S) {
+    const { running, sOn, eOn, sf, ef, spd, bypass, fresh, supply, extract, exhaust, preT, supPre, rotor } = S;
+    const bp = bypass == null ? 0 : clamp(bypass, 0, 100) / 100;
+
+    // --- colours along the two air streams ---
+    const preActive = this._on("preheater_active") || (this._n("preheater_power") || 0) > 0;
+    const afterPre = preT != null ? preT : fresh;
+    const exOut = supPre != null ? supPre : supply;
+    const cFresh = airColor(fresh), cPre = airColor(afterPre), cSup1 = airColor(exOut), cSup = airColor(supply);
+    const cExt = airColor(extract), cExh = airColor(exhaust);
+    const sSpd = spd(sf), eSpd = spd(ef);
+
+    this._pipe("a_fresh", sOn, cFresh, sSpd);
+    this._pipe("a_pre", sOn, cPre, sSpd);
+    this._pipe("a_sup1", sOn, cSup1, sSpd);
+    this._pipe("a_sup2", sOn, cSup, sSpd);
+    this._pipe("a_ext", eOn, cExt, eSpd);
+    this._pipe("a_exh", eOn, cExh, eSpd);
+    this._pipe("a_byp", sOn && bp > 0, cPre, sSpd);
+    this._var("a_byp", "--bo", bp > 0 ? (0.55 + 0.45 * bp).toFixed(2) : "1");
+    this._pipe("x_f", sOn, cPre, sSpd);
+    this._pipe("x_e", eOn, cExt, eSpd);
+
+
+    // --- exchanger ---
+    const hx = this._$("hx");
+    hx.classList.toggle("on", running);
+    hx.classList.toggle("rotor", rotor);
+    hx.classList.toggle("defrost", this._on("defrost"));
+    this._$("gf0").setAttribute("stop-color", cPre);
+    this._$("gf1").setAttribute("stop-color", cSup1);
+    this._$("ge0").setAttribute("stop-color", cExt);
+    this._$("ge1").setAttribute("stop-color", cExh);
+    hx.style.setProperty("--spd", sSpd);
+    hx.style.setProperty("--spde", eSpd);
+    hx.style.setProperty("--glow", lerpColor(cExt, cPre, 0.5));
+    this._var("ch_f", "--co", (1 - 0.75 * bp).toFixed(2));
+    this._cls("ch_f", "off", !sOn);
+    this._cls("ch_e", "off", !eOn);
+    this._cls("ch_e2", "off", !eOn);
+    const plen = (id, c, on) => { const el = this._$(id); if (el) el.style.fill = on ? `color-mix(in srgb, ${c} 22%, #1a1e24)` : ""; };
+    plen("pl_f", cPre, sOn); plen("pl_s", cSup1, sOn); plen("pl_e", cExt, eOn); plen("pl_x", cExh, eOn);
+    const rpm = this._n("rotor_rpm");
+    hx.classList.toggle("spin", rotor && running && (rpm == null ? this._on("rotor") || !this._has("rotor") : rpm > 0));
+    if (rpm) hx.style.setProperty("--rspd", `${clamp(30 / rpm, 2, 12).toFixed(1)}s`);
+
+    // --- bypass damper ---
+    const byp = this._$("byp");
+    byp.style.display = bypass == null ? "none" : "";
+    this._$("a_byp").style.display = bypass == null ? "none" : "";
+    byp.classList.toggle("open", bp > 0);
+    byp.style.setProperty("--c", cPre);
+    this._$("damper").style.transform = `rotate(${(90 - 90 * bp).toFixed(0)}deg)`;
+    this._txt("t_byp", bypass == null ? null : `${t.bypass} ${bp > 0 ? `${this._f(bypass, 0)} %` : t.closed}`);
+
+    // --- efficiency ---
+    this._txt("t_eff", S.eff != null ? `${this._f(S.eff, 0)} %` : null);
+    const rpmTxt = rotor && rpm != null ? ` · ${t.rotor} ${this._f(rpm, 1)} ${t.rpm}` : "";
+    this._txt("l_eff", S.eff != null || rpmTxt ? `${t.efficiency}${rpmTxt}` : null);
+
+    // --- filters ---
+    const due = this._on("filter");
+    this._cls("flt_f", "due", due); this._cls("flt_e", "due", due);
+    this._txt("l_flt_f", t.filter); this._txt("l_flt_e", t.filter);
+
+    // --- heating coils ---
+    const coil = (gid, tid, has, on, pct, color, label) => {
+      this._show(gid, has);
+      if (!has) return;
+      const g = this._$(gid);
+      g.classList.toggle("on", on);
+      g.style.setProperty("--hc", color);
+      g.style.setProperty("--hp", on && pct != null ? clamp(pct / 100, 0, 1).toFixed(2) : "0");
+      this._txt(tid, pct != null && pct > 0 ? `${label} ${this._f(pct, 0)} %` : label);
+    };
+    const preP = this._n("preheater_power");
+    coil("pre", "t_pre", this._has("preheater_power") || this._has("preheater_active"), preActive && running, preP, "#ff8a3d", t.preheater);
+    const heatP = this._n("heater_power");
+    const cooling = this._on("cooling");
+    coil("post", "t_post", this._has("heater_power") || this._has("cooling"), running && (cooling || (heatP || 0) > 0), heatP,
+      cooling ? "#3ddcff" : "#ff6b3d", cooling ? t.cooling : t.postheater);
+
+    // --- fans ---
+    const fan = (gid, rid, tid, on, pct, rpmv, faultKey, c) => {
+      this._txt(`r_${rid}`, rpmv != null ? `${this._f(rpmv, 0)} ${t.rpm}` : null);
+      const g = this._$(gid);
+      g.classList.toggle("on", on);
+      g.style.setProperty("--fc", c);
+      this._var(rid, "--fspd", `${clamp(2.0 - (pct == null ? 50 : pct) * 0.016, 0.35, 2).toFixed(2)}s`);
+      g.classList.toggle("fault", this._alarms().includes(faultKey));
+      this._txt(tid, pct != null ? `${this._f(pct, 0)} %` : null);
+    };
+    fan("fan_e", "fe", "t_fe", eOn, ef, S.er, "exhaust_fan_failure", lerpColor(cExh, "#ffffff", 0.15));
+    fan("fan_s", "fs", "t_fs", sOn, sf, S.sr, "supply_fan_failure", lerpColor(cSup, "#ffffff", 0.15));
+
+    // --- temperatures ---
+    this._txt("l_fresh", t.fresh); this._txt("t_fresh", this._T("fresh") || "—");
+    this._txt("l_exh", t.exhaust); this._txt("t_exh", this._T("exhaust") || "—");
+    this._txt("l_ext", t.extract); this._txt("t_ext", this._T("extract") || "—");
+    this._txt("l_sup", t.supply); this._txt("t_sup", this._T("supply") || "—");
+    this._$("t_fresh").style.fill = cFresh; this._$("t_exh").style.fill = cExh;
+    this._$("t_ext").style.fill = cExt; this._$("t_sup").style.fill = cSup;
+    this._txt("l_out", t.outside);
+    this._txt("l_house", t.house);
+    this._txt("t_room", this._T("room"));
+    this._show("house", true);
+  }
+
+  _updateControls(t, S) {
+    const hasMode = this._has("mode") || this._has("fan");
+    this._show("seg", hasMode);
+    this.shadowRoot.querySelectorAll(".mb[data-mode]").forEach((b) => {
+      b.classList.toggle("act", b.dataset.mode === S.mode);
+      b.classList.toggle("busy", this._busy === "mode");
+    });
+    const hasFire = this._has("fireplace");
+    this._show("seg2", hasFire);
+    this._cls("btn_fire", "act", this._on("fireplace"));
+    this._cls("btn_fire", "busy", this._busy === "fireplace");
+
+    const items = [];
+    for (const a of this._alarms()) items.push(`<div class="alert err"><span>${esc(t.alarms[a] || t.alarm)}</span></div>`);
+    if (this._on("filter")) {
+      items.push(`<div class="alert"><span>${esc(t.filterDue)}</span>${this._has("confirm_filter") ? `<button data-press="confirm_filter"${this._busy === "confirm_filter" ? " disabled" : ""}><b>${esc(t.confirm)}</b></button>` : ""}</div>`);
+    }
+    if (this._on("service")) {
+      items.push(`<div class="alert"><span>${esc(t.serviceDue)}</span>${this._has("confirm_service") ? `<button data-press="confirm_service"${this._busy === "confirm_service" ? " disabled" : ""}><b>${esc(t.confirm)}</b></button>` : ""}</div>`);
+    }
+    this._html("alerts", items.join(""));
+    this._show("alerts", items.length > 0);
+  }
+
+  _updateTiles(t, S) {
+    const tile = (id, has) => this._show(`${id}_w`, has);
+
+    tile("k_eff", S.eff != null || this._has("efficiency"));
+    this._html("k_eff", S.eff != null ? `${this._f(S.eff, 0)}<small>%</small>` : "—");
+    this._$("k_eff_b").style.width = `${S.eff != null ? clamp(S.eff, 0, 100) : 0}%`;
+
+    const flow = (k) => {
+      const v = this._n(k);
+      if (v == null) return null;
+      const u = this._unit(k).toLowerCase();
+      return u.includes("m³") || u.includes("m3") ? v : v * 3.6;
+    };
+    const fs = flow("supply_flow"), fe = flow("exhaust_flow");
+    tile("k_flow", this._has("supply_flow") || this._has("exhaust_flow"));
+    this._html("k_flow", fs != null ? `${this._f(fs, 0)}<small>m³/h</small>` : "—");
+    this._txt("k_flow_s", fe != null ? `${t.extractShort} ${this._f(fe, 0)} m³/h` : "");
+
+    tile("k_fans", this._has("supply_fan") || this._has("exhaust_fan"));
+    this._html("k_fans", S.sf != null ? `${this._f(S.sf, 0)}<small>%</small>` : "—");
+    this._txt("k_fans_s", S.ef != null ? `${t.extractShort} ${this._f(S.ef, 0)} %` : "");
+
+    const co2 = this._n("co2");
+    tile("k_co2", this._has("co2"));
+    this._html("k_co2", co2 != null ? `${this._f(co2, 0)}<small>ppm</small>` : "—");
+    const co2c = co2 == null ? "#4a525d" : co2 < 800 ? "#6fdc8c" : co2 < 1000 ? "#ffd54f" : co2 < 1400 ? "#ff9f43" : "#ff6e64";
+    const b = this._$("k_co2_b");
+    b.style.width = `${co2 != null ? clamp((co2 - 400) / 16, 4, 100) : 0}%`;
+    b.style.setProperty("--bc", co2c);
+
+    const hum = this._n("humidity"), ah = this._n("abs_humidity");
+    tile("k_hum", this._has("humidity"));
+    this._html("k_hum", hum != null ? `${this._f(hum, 0)}<small>%</small>` : "—");
+    this._txt("k_hum_s", ah != null ? `${this._f(ah, 1)} g/m³` : "");
+
+    const voc = this._n("voc");
+    tile("k_voc", this._has("voc"));
+    this._html("k_voc", voc != null ? `${this._f(voc, 0)}<small>ppm</small>` : "—");
+    this._txt("k_voc_s", "");
+
+    const h = this._n("hours_service");
+    tile("k_srv", this._has("hours_service"));
+    this._html("k_srv", h != null ? `${this._f(h, 0)}<small>h</small>` : "—");
+    this._txt("k_srv_s", h != null ? t.inDays(this._f(h / 24, 0)) : "");
+  }
+
+  /* ---------- actions ---------- */
+  async _run(key, fn) {
+    this._busy = key;
+    this._update();
+    try { await fn(); } catch (err) {
+      this.dispatchEvent(new CustomEvent("hass-notification", { detail: { message: String((err && err.message) || err) }, bubbles: true, composed: true }));
+    } finally { this._busy = null; this._update(); }
+  }
+
+  _setMode(mode) {
+    const sel = this._st("mode");
+    if (sel && (sel.attributes.options || []).includes(mode)) {
+      this._run("mode", () => this._hass.callService("select", "select_option", { entity_id: sel.entity_id, option: mode }));
+      return;
+    }
+    const fan = this._eid("fan");
+    if (!fan) return;
+    this._run("mode", () => (mode === "stopped"
+      ? this._hass.callService("fan", "turn_off", { entity_id: fan })
+      : this._hass.callService("fan", "set_preset_mode", { entity_id: fan, preset_mode: mode === "travelling" ? "travelling" : mode })));
+  }
+
+  _toggleFireplace() {
+    const id = this._eid("fireplace");
+    if (id) this._run("fireplace", () => this._hass.callService("switch", this._on("fireplace") ? "turn_off" : "turn_on", { entity_id: id }));
   }
 
   _press(key) {
-    const id = this._map[key];
+    const id = this._eid(key);
     if (id) this._run(key, () => this._hass.callService("button", "press", { entity_id: id }));
   }
-
-  _more(key) {
-    const id = this._map[key];
-    if (id) this.dispatchEvent(new CustomEvent("hass-more-info", { detail: { entityId: id }, bubbles: true, composed: true }));
-  }
 }
 
-const STYLE = `
-  :host {
-    --sc-cold: #3b82c4; --sc-warm: #e0a020; --sc-hot: #d9662b; --sc-used: #8a8f98;
-    --sc-ok: var(--success-color, #2e9d5b); --sc-error: var(--error-color, #d64545); --sc-warn: var(--warning-color, #e0a020);
-  }
-  ha-card { padding: 16px; overflow: hidden; }
-  .empty { color: var(--secondary-text-color); }
-  .header { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
-  .title { font-size: 1.15rem; font-weight: 600; color: var(--primary-text-color); }
-  .pill { display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border-radius: 999px; font-size: .8rem; white-space: nowrap;
-          background: color-mix(in srgb, var(--secondary-text-color) 14%, transparent); color: var(--secondary-text-color); }
-  .pill .dot { width: 8px; height: 8px; border-radius: 50%; background: currentColor; }
-  .pill.ok { background: color-mix(in srgb, var(--sc-ok) 14%, transparent); color: var(--sc-ok); }
-  .pill.error { background: color-mix(in srgb, var(--sc-error) 14%, transparent); color: var(--sc-error); }
-  .banner { display: flex; align-items: center; gap: 8px; margin-top: 10px; padding: 8px 10px; border-radius: 10px; font-size: .85rem; }
-  .banner svg { flex: none; }
-  .banner.error { background: color-mix(in srgb, var(--sc-error) 12%, transparent); color: var(--sc-error); }
-  .banner.warn { background: color-mix(in srgb, var(--sc-warn) 14%, transparent); color: var(--primary-text-color); }
-  .banner.warn svg { color: var(--sc-warn); }
-  .banner .link { margin-left: auto; border: 0; background: transparent; color: var(--primary-color); font: inherit; font-weight: 600; cursor: pointer; }
-  .diagram { width: 100%; height: auto; display: block; margin: 8px 0 4px; cursor: pointer; }
-  .side { font-size: 10px; fill: var(--secondary-text-color); letter-spacing: .08em; text-transform: uppercase; }
-  .duct { fill: none; stroke-width: 16; stroke-linecap: round; opacity: .18; }
-  .duct.cold { stroke: var(--sc-cold); } .duct.warm { stroke: var(--sc-warm); } .duct.hot { stroke: var(--sc-hot); } .duct.used { stroke: var(--sc-used); }
-  .air { fill: none; stroke-width: 4; stroke-linecap: round; stroke-dasharray: 2 12; opacity: .9; }
-  .air.cold { stroke: var(--sc-cold); } .air.warm { stroke: var(--sc-warm); } .air.hot { stroke: var(--sc-hot); } .air.used { stroke: var(--sc-used); }
-  .air.flowing { animation: flow linear infinite; }
-  .arrow { fill: none; stroke-width: 3; stroke-linecap: round; stroke-linejoin: round; }
-  .arrow.warm { stroke: var(--sc-warm); } .arrow.used { stroke: var(--sc-used); }
-  .inner { fill: none; stroke-width: 10; stroke-linecap: round; opacity: .14; }
-  .inner.cold { stroke: var(--sc-cold); } .inner.warm { stroke: var(--sc-warm); } .inner.hot { stroke: var(--sc-hot); } .inner.used { stroke: var(--sc-used); }
-  .plate-body { fill: var(--card-background-color, #fff); stroke: var(--secondary-text-color); stroke-width: 1.5; }
-  .plate-line { stroke-width: 1.4; opacity: .7; }
-  .plate-line.cold { stroke: var(--sc-cold); } .plate-line.warm { stroke: var(--sc-hot); }
-  .plates.defrost .plate-body { stroke: var(--sc-cold); stroke-width: 2.5; }
-  .bypass-channel { fill: none; stroke: var(--secondary-text-color); stroke-width: 12; stroke-linecap: round; opacity: .08; }
-  .damper { stroke: var(--primary-text-color); stroke-width: 3; stroke-linecap: round; }
-  .damper-pivot { fill: var(--primary-text-color); }
-  .bypass-label { font-size: 10px; font-weight: 600; fill: var(--primary-text-color); }
-  .coil rect { fill: var(--card-background-color, #fff); stroke: var(--secondary-text-color); stroke-width: 1.2; }
-  .coil .fins line { stroke: var(--secondary-text-color); stroke-width: 1.2; }
-  .coil.heat rect { stroke: var(--sc-error); fill: color-mix(in srgb, var(--sc-error) 14%, var(--card-background-color, #fff)); }
-  .coil.heat .fins line { stroke: var(--sc-error); }
-  .coil.cool rect { stroke: var(--sc-cold); fill: color-mix(in srgb, var(--sc-cold) 14%, var(--card-background-color, #fff)); }
-  .coil.cool .fins line { stroke: var(--sc-cold); }
-  .coil-label { font-size: 8px; fill: var(--secondary-text-color); }
-  .coil-value { font-size: 9px; font-weight: 600; fill: var(--primary-text-color); }
-  .unit { fill: var(--secondary-background-color, #f2f3f5); stroke: var(--divider-color, #d0d0d0); stroke-width: 1.5; }
-  .split { stroke: var(--divider-color, #d0d0d0); stroke-dasharray: 4 4; }
-  .rotor-ring { fill: var(--card-background-color, #fff); stroke: var(--secondary-text-color); stroke-width: 2; }
-  .rotor-spoke { stroke: var(--secondary-text-color); stroke-width: 1.2; opacity: .55; }
-  .rotor-hub { fill: var(--secondary-text-color); }
-  .rotor, .fan-icon { transform-box: view-box; transform-origin: 0 0; }
-  .rotor.spinning { animation: spin 4s linear infinite; }
-  .rotor.defrost .rotor-ring { stroke: var(--sc-cold); }
-  .fan-icon { color: var(--secondary-text-color); }
-  .fan-icon.spinning { animation: spin linear infinite; }
-  .tag-label { font-size: 10px; fill: var(--secondary-text-color); }
-  .tag-value { font-size: 15px; font-weight: 600; fill: var(--primary-text-color); font-variant-numeric: tabular-nums; }
-  .tag.cold .tag-label { fill: var(--sc-cold); } .tag.warm .tag-label { fill: var(--sc-warm); }
-  .tag.hot .tag-label { fill: var(--sc-hot); } .tag.used .tag-label { fill: var(--sc-used); }
-  @keyframes flow { to { stroke-dashoffset: -28; } }
-  @keyframes spin { to { transform: rotate(360deg); } }
-  @media (prefers-reduced-motion: reduce) { .air, .rotor, .fan-icon { animation: none !important; } }
-  .stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin: 4px 0 12px; }
-  .stats > div { display: flex; flex-direction: column; }
-  .stat-label { font-size: .75rem; color: var(--secondary-text-color); }
-  .stat-value { font-size: 1rem; font-weight: 600; color: var(--primary-text-color); font-variant-numeric: tabular-nums; }
-  .modes { display: grid; grid-template-columns: repeat(5, 1fr); gap: 3px; padding: 3px; border-radius: 12px; background: var(--secondary-background-color, rgba(0,0,0,.05)); }
-  .mode { border: 0; border-radius: 9px; padding: 9px 4px; font: inherit; font-size: .85rem; background: transparent; color: var(--secondary-text-color); cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .mode:disabled { cursor: default; }
-  .mode.active { background: var(--card-background-color, #fff); color: var(--primary-text-color); font-weight: 600; box-shadow: 0 1px 3px rgba(0,0,0,.15); }
-  .mode.active.boost { color: var(--sc-hot); } .mode.active.away, .mode.active.travelling { color: var(--sc-cold); } .mode.active.home { color: var(--sc-ok); }
-  .chips { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
-  .chip { display: flex; flex-direction: column; padding: 6px 10px; border-radius: 10px; background: var(--secondary-background-color, rgba(0,0,0,.04)); min-width: 64px; }
-  .chip-label { font-size: .72rem; color: var(--secondary-text-color); }
-  .chip-value { font-size: .95rem; font-weight: 600; color: var(--primary-text-color); font-variant-numeric: tabular-nums; }
-  .chip.good .chip-value { color: var(--sc-ok); } .chip.fair .chip-value { color: var(--sc-warn); } .chip.poor .chip-value { color: var(--sc-error); }
-  .footer { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; margin-top: 12px; font-size: .8rem; }
-  .toggle { display: inline-flex; align-items: center; gap: 6px; padding: 6px 12px; border-radius: 999px; border: 1px solid var(--divider-color, #ddd);
-            background: transparent; color: var(--primary-text-color); font: inherit; cursor: pointer; }
-  .toggle.on { background: color-mix(in srgb, var(--sc-hot) 14%, transparent); border-color: color-mix(in srgb, var(--sc-hot) 40%, transparent); color: var(--sc-hot); }
-  .badge { display: inline-flex; align-items: center; gap: 4px; color: var(--sc-cold); }
-  .muted { color: var(--secondary-text-color); margin-left: auto; }
-  @media (max-width: 420px) { .mode { font-size: .75rem; } .stat-value { font-size: .9rem; } }
+/* ------------------------------------------------------------------------------------------ */
+/*  Mini card                                                                                  */
+/* ------------------------------------------------------------------------------------------ */
+const MINI_CSS = `
+.mwrap{container-type:inline-size}
+.mini{display:grid;grid-template-columns:minmax(110px,150px) 1fr;gap:6px 14px;align-items:center;padding:12px 14px 12px 10px}
+.mini svg{width:100%;height:auto;display:block}
+.mini .duct .pb{stroke-width:11}.mini .duct .pg{stroke-width:13}.mini .duct .pc{stroke-width:6}
+.mini .duct .pf{stroke-width:1.8;stroke-dasharray:1.5 9}.mini .duct.on .pf{animation-name:flowm}
+.mini .ch .cb path{stroke-width:3.4}.mini .ch .cc path{stroke-width:2.3}.mini .ch .cf path{stroke-width:1;stroke-dasharray:1 6}
+.mini #hx.on .ch .cf path{animation-name:flowm2}
+@keyframes flowm{to{stroke-dashoffset:-10.5}}
+@keyframes flowm2{to{stroke-dashoffset:-7}}
+.mtop{display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;min-width:0}
+.mname{font-size:14px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.mini .pill{padding:4px 10px 4px 8px;font-size:12px}
+.mstats{display:grid;grid-template-columns:repeat(auto-fit,minmax(46px,1fr));gap:4px 8px;margin-top:8px}
+.ms{cursor:pointer;min-width:0}
+.ms .l{font-size:10.5px;color:#9aa3ad;text-transform:uppercase;letter-spacing:.5px;white-space:nowrap}
+.ms .v{font-size:16px;font-weight:600;font-variant-numeric:tabular-nums;white-space:nowrap}
+.ms .v small{font-size:11px;color:#9aa3ad;font-weight:500;margin-left:1px}
+.ms.hide{display:none}
+.mclick{cursor:pointer}
+@container (max-width:400px){.mini{grid-template-columns:92px 1fr;gap:4px 10px;padding:10px 12px 10px 8px}.mname{display:none}
+  .mtop{justify-content:flex-start}.ms .v{font-size:15px}.mstats{grid-template-columns:repeat(auto-fit,minmax(42px,1fr));gap:3px 6px}}
+@container (max-width:260px){.mini{grid-template-columns:1fr}.mini svg{max-width:160px;margin:0 auto}}
 `;
 
-if (!customElements.get("swegon-casa-card")) {
-  customElements.define("swegon-casa-card", SwegonCasaCard);
-  window.customCards = window.customCards || [];
-  window.customCards.push({ type: "swegon-casa-card", name: "Swegon CASA", description: "Schéma, températures, modes et qualité d'air de la centrale Swegon CASA.", preview: true });
-  console.info(`%c SWEGON-CASA-CARD %c ${CARD_VERSION} `, "background:#3b82c4;color:#fff", "");
+function buildMiniSVG() {
+  const hs = 26;
+  let ext = "", fresh = "";
+  for (let i = 0; i < 6; i++) {
+    const k = -21.5 + i * 8.6;
+    ext += `<path d="M${k.toFixed(1)} ${-hs} V${hs}"/>`;
+    fresh += `<path d="M${-hs} ${k.toFixed(1)} H${hs}"/>`;
+  }
+  return `
+<svg viewBox="0 0 200 122" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="gFresh" gradientUnits="userSpaceOnUse" x1="${-hs}" y1="0" x2="${hs}" y2="0"><stop id="gf0" offset="0" stop-color="#64b5f6"/><stop id="gf1" offset="1" stop-color="#ffa36b"/></linearGradient>
+    <linearGradient id="gExt" gradientUnits="userSpaceOnUse" x1="0" y1="${-hs}" x2="0" y2="${hs}"><stop id="ge0" offset="0" stop-color="#ffa36b"/><stop id="ge1" offset="1" stop-color="#64b5f6"/></linearGradient>
+    <linearGradient id="gHx" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#1d2228"/><stop offset="1" stop-color="#262c34"/></linearGradient>
+  </defs>
+  ${pipe("mp_fresh", "M4 22 H58 L82 42", "duct")}
+  ${pipe("mp_ext", "M196 22 H142 L118 42", "duct")}
+  ${pipe("mp_exh", "M82 80 L58 100 H4", "duct")}
+  ${pipe("mp_sup", "M118 80 L142 100 H196", "duct")}
+  <g id="hx" class="mclick" data-e="efficiency">
+    <g transform="translate(100 61) rotate(45)">
+      <rect class="hxbg" x="${-hs}" y="${-hs}" width="${hs * 2}" height="${hs * 2}" rx="3"/>
+      <g class="ch ext" id="ch_e"><g class="cb">${ext}</g><g class="cc">${ext}</g><g class="cf">${ext}</g></g>
+      <g class="ch fresh" id="ch_f"><g class="cb">${fresh}</g><g class="cc">${fresh}</g><g class="cf">${fresh}</g></g>
+      <rect class="hxframe" x="${-hs}" y="${-hs}" width="${hs * 2}" height="${hs * 2}" rx="3" style="stroke-width:2"/>
+    </g>
+  </g>
+</svg>`;
 }
+
+class SwegonCasaMiniCard extends SwegonCasaCard {
+  getCardSize() { return 2; }
+  getGridOptions() { return { columns: 6, min_columns: 4, rows: 2 }; }
+
+  _build() {
+    const root = this.attachShadow({ mode: "open" });
+    const t = this._t();
+    root.innerHTML = `
+      <style>${CSS}${MINI_CSS}</style>
+      <ha-card class="mwrap">
+        <div class="mini">
+          <div class="mclick" id="msvg">${buildMiniSVG()}</div>
+          <div style="min-width:0">
+            <div class="mtop">
+              <div class="mname" id="m_name"></div>
+              <span class="pill" id="h_mode" data-e="ventilation"><span class="dot"></span><span id="h_mode_t">—</span></span>
+            </div>
+            <div class="mstats">
+              <div class="ms" data-e="fresh"><div class="l">${esc(t.short.out)}</div><div class="v" id="m_out">—</div></div>
+              <div class="ms" data-e="supply"><div class="l">${esc(t.short.supply)}</div><div class="v" id="m_sup">—</div></div>
+              <div class="ms" data-e="efficiency"><div class="l">${esc(t.short.eff)}</div><div class="v" id="m_eff">—</div></div>
+              <div class="ms" data-e="co2" id="m_co2_w"><div class="l">${esc(t.co2)}</div><div class="v" id="m_co2">—</div></div>
+            </div>
+          </div>
+        </div>
+      </ha-card>`;
+    root.addEventListener("click", (ev) => {
+      const path = ev.composedPath();
+      const nav = this._config.navigation_path;
+      if (nav && path.some((n) => n.id === "msvg")) {
+        history.pushState(null, "", nav);
+        window.dispatchEvent(new CustomEvent("location-changed", { detail: { replace: false } }));
+        return;
+      }
+      const el = path.find((n) => n.dataset && n.dataset.e);
+      const id = el ? this._eid(el.dataset.e) || this._eid("mode") : this._eid("fan") || this._eid("mode");
+      if (id) this.dispatchEvent(new CustomEvent("hass-more-info", { detail: { entityId: id }, bubbles: true, composed: true }));
+    });
+  }
+
+  _applyLayout() {}
+
+  _update() {
+    if (!this._hass || !this.shadowRoot) return;
+    if (!this._map) this._resolveAll();
+    const t = this._t();
+    const S = this._computeState();
+    this._txt("m_name", this._config.title || this._deviceName());
+    this._updateHeader(t, S);
+
+    const cFresh = airColor(S.fresh), cSup = airColor(S.supply), cExt = airColor(S.extract), cExh = airColor(S.exhaust);
+    const sSpd = S.spd(S.sf), eSpd = S.spd(S.ef);
+    this._pipe("mp_fresh", S.sOn, cFresh, sSpd);
+    this._pipe("mp_sup", S.sOn, cSup, sSpd);
+    this._pipe("mp_ext", S.eOn, cExt, eSpd);
+    this._pipe("mp_exh", S.eOn, cExh, eSpd);
+    const hx = this._$("hx");
+    hx.classList.toggle("on", S.running);
+    hx.style.setProperty("--spd", sSpd);
+    hx.style.setProperty("--spde", eSpd);
+    this._$("gf0").setAttribute("stop-color", cFresh);
+    this._$("gf1").setAttribute("stop-color", cSup);
+    this._$("ge0").setAttribute("stop-color", cExt);
+    this._$("ge1").setAttribute("stop-color", cExh);
+    this._var("ch_f", "--co", (1 - 0.75 * (S.bypass ? clamp(S.bypass, 0, 100) / 100 : 0)).toFixed(2));
+
+    const deg = (v) => (v == null ? "—" : `${this._f(v, 1)}<small>°</small>`);
+    this._html("m_out", deg(S.fresh));
+    this._html("m_sup", deg(S.supply));
+    this._html("m_eff", S.eff != null ? `${this._f(S.eff, 0)}<small>%</small>` : "—");
+    const co2 = this._n("co2");
+    this._html("m_co2", co2 != null ? `${this._f(co2, 0)}<small>ppm</small>` : "—");
+    this._cls("m_co2_w", "hide", !this._has("co2"));
+  }
+}
+
+if (!customElements.get("swegon-casa-card")) customElements.define("swegon-casa-card", SwegonCasaCard);
+if (!customElements.get("swegon-casa-mini-card")) customElements.define("swegon-casa-mini-card", SwegonCasaMiniCard);
+window.customCards = window.customCards || [];
+if (!window.customCards.find((c) => c.type === "swegon-casa-card")) {
+  window.customCards.push({
+    type: "swegon-casa-card",
+    name: "Swegon CASA",
+    description: "Schéma animé de la centrale double flux : échangeur à flux croisés, by-pass, batteries, ventilateurs, modes et qualité d'air.",
+    preview: true,
+  });
+}
+if (!window.customCards.find((c) => c.type === "swegon-casa-mini-card")) {
+  window.customCards.push({
+    type: "swegon-casa-mini-card",
+    name: "Swegon CASA — Mini",
+    description: "Version compacte : mode, températures, rendement et CO₂.",
+    preview: true,
+  });
+}
+console.info(`%c SWEGON-CASA-CARD %c v${CARD_VERSION} `, "background:#3d7bff;color:#fff;font-weight:700;border-radius:4px 0 0 4px", "background:#22262c;color:#fff;border-radius:0 4px 4px 0");

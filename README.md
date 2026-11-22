@@ -4,7 +4,7 @@ Intégration Home Assistant **locale** pour les centrales de ventilation double 
 
 - **Toutes les variables** de la table Modbus Swegon SCB 3.x : environ 150 entités (températures, qualité d'air, débits, ventilateurs, roue, by-pass, dégivrage, alarmes, fonctions Smart, réglages).
 - **Ventilateur** avec les modes Absent, Maison, Boost et Voyage, pour les tableaux de bord et les assistants vocaux.
-- **Carte de tableau de bord** livrée avec l'intégration : schéma animé de la centrale avec les quatre flux d'air et leurs températures, l'échangeur (à plaques pour la série W, roue pour la série R), le by-pass avec son ouverture en %, les batteries de préchauffe et de post-chauffe avec leur puissance, les ventilateurs, les modes, la qualité d'air et les alarmes.
+- **Carte de tableau de bord** livrée avec l'intégration : schéma animé de la centrale, avec les deux flux qui se croisent dans l'échangeur à plaques (ou la roue de la série R), colorés selon leur température, le by-pass et son volet en %, les batteries de préchauffe et de post-chauffe, les filtres, les ventilateurs, les modes, la qualité d'air et les alarmes. Une mini-carte existe aussi.
 - **Détection automatique** de l'adresse esclave, de la numérotation des registres et de la version du logiciel (3.0 ou 3.1).
 - **Seuls les équipements présents** créent des entités : sondes de qualité d'air, panneau, post-chauffage, préchauffage, hotte, aspiration centralisée, entrées/sorties GIO, réglages installateur.
 - **Écritures vérifiées** : chaque réglage est contrôlé par rapport aux bornes de la documentation, puis relu après écriture.
@@ -45,10 +45,44 @@ Les équipements et les intervalles de lecture (15 s pour les mesures, 60 s pour
 Elle est chargée automatiquement avec l'intégration : modifier le tableau de bord > Ajouter une carte > **Swegon CASA**, ou en YAML :
 
 ```yaml
-type: custom:swegon-casa-card
+type: custom:swegon-casa-card        # ou custom:swegon-casa-mini-card
 ```
 
-Options : `title`, `device_id` (si plusieurs centrales) et `exchanger` (`plate` ou `rotor`, détecté d'après le modèle). Un clic sur un mode change le mode de fonctionnement, le bouton « Cheminée » lance la fonction cheminée, et « Acquitter » valide le remplacement du filtre.
+Ce que montre le schéma :
+
+- **Échangeur à plaques à flux croisés** : l'air neuf (haut gauche → bas droite) et l'air extrait (haut droite → bas gauche) se croisent dans l'empilement de plaques. Chaque canal est coloré de sa température d'entrée à sa température de sortie, et les flux s'animent à la vitesse des ventilateurs. Givre et flocons pendant le dégivrage. Les centrales de la série R affichent une roue qui tourne à sa vitesse réelle.
+- **By-pass** : le volet pivote selon l'ouverture en %, le canal de contournement s'allume et les canaux d'air neuf de l'échangeur s'estompent d'autant.
+- **Batteries** de préchauffe et de post-chauffe, qui rougeoient selon leur puissance (bleu en rafraîchissement), **filtres** (orange quand ils sont à remplacer), **ventilateurs** avec commande en % et vitesse, températures des quatre flux et de l'ambiance.
+- **Modes** Arrêt / Absent / Maison / Boost / Voyage et bouton Cheminée, **alertes** avec bouton « Acquitter » pour le filtre et l'entretien, **tuiles** : rendement, débits en m³/h, ventilateurs, CO₂, humidité, COV, heures avant entretien.
+
+Un clic sur un élément ouvre son entité. En dessous de 640 px de large, la carte passe en version compacte.
+
+| Option | Défaut | Rôle |
+| --- | --- | --- |
+| `title` | nom de l'appareil | Titre |
+| `device_id` | première centrale | Si plusieurs centrales |
+| `exchanger` | détecté | `plate` ou `rotor` |
+| `show_header`, `show_controls`, `show_stats` | `true` | Masquer l'en-tête, les boutons ou les tuiles |
+| `entities` | détectées | Remplacer une entité, ou `null` pour la masquer |
+| `navigation_path` | — | Mini-carte : page ouverte au clic sur le schéma |
+
+La carte fonctionne aussi avec une configuration **Modbus YAML** : indiquez vos entités avec `entities:`. Les modes numériques (0 = arrêt … 4 = voyage) sont reconnus.
+
+```yaml
+type: custom:swegon-casa-card
+title: Ventilation
+entities:
+  fresh: sensor.casa_air_neuf
+  supply: sensor.casa_air_souffle
+  extract: sensor.casa_air_extrait
+  exhaust: sensor.casa_air_rejete
+  ventilation: sensor.casa_mode
+  supply_fan: sensor.casa_ventilateur_soufflage
+  exhaust_fan: sensor.casa_ventilateur_extraction
+  bypass: sensor.casa_bypass
+```
+
+Autres clés : `room`, `supply_pre`, `preheater_temp`, `efficiency`, `supply_rpm`, `exhaust_rpm`, `supply_flow`, `exhaust_flow`, `bypass_manual`, `preheater_power`, `preheater_active`, `heater_power`, `cooling`, `defrost`, `night_cooling`, `rotor`, `rotor_rpm`, `co2`, `humidity`, `abs_humidity`, `voc`, `boost_left`, `week_timer`, `alarm`, `filter`, `service`, `hours_service`, `mode` (sélecteur), `fan`, `fireplace`, `confirm_filter`, `confirm_service`.
 
 ## Entités principales
 
@@ -110,7 +144,7 @@ Valeurs du mode : `stopped`, `away`, `home`, `boost`, `travelling`.
 
 ## Dépannage
 
-- **`/dev/ttyS0` ne répond pas** : c'est le port série intégré au PC, pas l'adaptateur USB. Choisissez l'adaptateur, en général `/dev/serial/by-id/usb-…` ou `/dev/ttyUSB0` (liste complète : Paramètres > Système > Matériel > Tout le matériel, filtre « tty »).
+- **La détection tourne sans aboutir** : un bloc `modbus:` en YAML utilise sans doute déjà le port. Commentez-le, redémarrez, puis reprenez la configuration avec le même port, la même vitesse et la même parité que dans le YAML. Avec un adaptateur USB, préférez le chemin `/dev/serial/by-id/usb-…` à `/dev/ttyUSB0` (liste complète : Paramètres > Système > Matériel > Tout le matériel, filtre « tty »).
 - **« La centrale ne répond pas »** : vérifiez le port, l'inversion A/B, le cavalier JP1, la vitesse (38 400) et que rien d'autre n'utilise le port.
 - **Valeurs décalées** (le CO2 affiche l'humidité, par exemple) : la documentation Swegon numérote les registres à partir de 1. L'intégration détecte ce décalage ; les diagnostics indiquent celui qui a été retenu (`offset`).
 - **Diagnostics** : page de l'intégration > ⋮ > Télécharger les diagnostics. Toutes les valeurs brutes y figurent ; le numéro de série est masqué.
