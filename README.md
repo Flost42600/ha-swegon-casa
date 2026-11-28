@@ -54,6 +54,8 @@ Ce que montre le schéma :
 - **By-pass** : le volet pivote selon l'ouverture en %, le canal de contournement s'allume et les canaux d'air neuf de l'échangeur s'estompent d'autant.
 - **Batteries** de préchauffe et de post-chauffe, qui rougeoient selon leur puissance (bleu en rafraîchissement), **filtres** (orange quand ils sont à remplacer), **ventilateurs** avec commande en % et vitesse, températures des quatre flux.
 - **Modes** Arrêt / Absent / Maison / Boost / Voyage et bouton Cheminée, **alertes** avec bouton « Acquitter » pour le filtre et l'entretien, **tuiles** : ambiance, rendement, débits en m³/h, ventilateurs, CO₂, humidité, COV, heures avant entretien.
+- **Consigne de température** réglable avec − / + (plusieurs appuis envoyés en une seule écriture). Si la centrale applique une autre valeur (baisse en mode Absent ou Voyage), elle s'affiche dessous.
+- **Pilotage confort** (bouton Confort) et badge « Vitesse réduite » quand il agit, **filtres** : jours restants, alerte et bouton « Filtres changés ». Ces éléments s'affichent dès que leurs entités sont indiquées (voir plus bas).
 
 Un clic sur un élément ouvre son entité. En dessous de 640 px de large, la carte passe en version compacte.
 
@@ -66,7 +68,9 @@ Un clic sur un élément ouvre son entité. En dessous de 640 px de large, la ca
 | `entities` | détectées | Remplacer une entité, ou `null` pour la masquer |
 | `navigation_path` | — | Mini-carte : page ouverte au clic sur le schéma |
 
-La carte fonctionne aussi avec une configuration **Modbus YAML** : indiquez vos entités avec `entities:`. Les modes numériques (0 = arrêt … 4 = voyage) sont reconnus.
+La **mini-carte** affiche les températures des quatre flux au bout des gaines (et en tuiles quand elle est étroite). Sans clé `entities:` à elle, elle reprend celles de la grande carte configurée sur le même navigateur : il suffit d'ajouter `type: custom:swegon-casa-mini-card`.
+
+La carte fonctionne aussi avec une configuration **Modbus YAML** : indiquez vos entités avec `entities:`. Le mode peut être un `select` ou un `input_select` (options Stop / Away / Home / Boost, Arrêt / Absent / Maison…, ou 0 … 4), la cheminée et le pilotage confort un `switch` ou un `input_boolean`, les boutons des `button` ou des `input_button`, la consigne un `number` ou un `input_number`.
 
 ```yaml
 type: custom:swegon-casa-card
@@ -80,6 +84,19 @@ entities:
   supply_fan: sensor.casa_ventilateur_soufflage
   exhaust_fan: sensor.casa_ventilateur_extraction
   bypass: sensor.casa_bypass
+```
+
+Consigne, pilotage confort et filtres (par exemple avec des entrées Home Assistant) :
+
+```yaml
+  setpoint: input_number.vmc_consigne            # consigne réglable
+  heater_setpoint: sensor.vmc_consigne_appliquee # consigne relue (facultatif)
+  comfort: input_boolean.vmc_pilotage_confort    # pilotage confort marche / arrêt
+  comfort_active: input_boolean.vmc_vitesse_reduite_par_le_pilotage
+  filter: binary_sensor.vmc_filtres_a_remplacer
+  filter_days: sensor.vmc_filtres_jours_restants
+  filter_interval: input_number.vmc_filtres_intervalle
+  filter_reset: input_button.vmc_filtres_changes
 ```
 
 Autres clés : `room`, `supply_pre`, `preheater_temp`, `efficiency`, `supply_rpm`, `exhaust_rpm`, `supply_flow`, `exhaust_flow`, `bypass_manual`, `preheater_power`, `preheater_active`, `heater_power`, `cooling`, `defrost`, `night_cooling`, `rotor`, `rotor_rpm`, `co2`, `humidity`, `abs_humidity`, `voc`, `boost_left`, `week_timer`, `alarm`, `filter`, `service`, `hours_service`, `mode` (sélecteur), `fan`, `fireplace`, `confirm_filter`, `confirm_service`.

@@ -9,12 +9,21 @@
  *   show_header / show_controls / show_stats: true
  *   entities:                            optional overrides, e.g. for a YAML modbus setup
  *     fresh: sensor.casa_air_neuf
+ *     mode: input_select.casa_mode       select / input_select (Stop/Away/Home/Boost or 0..4)
+ *     setpoint: input_number.casa_consigne   temperature setpoint, adjustable from the card
+ *     comfort: input_boolean.casa_confort    comfort speed control on / off
+ *     comfort_active: binary_sensor.xxx      speed currently reduced by that control
+ *     filter_days: sensor.casa_filtre_jours  days left before the filter change
+ *     filter_interval: input_number.xxx      days between two changes (or attribute interval_days)
+ *     filter_reset: input_button.casa_filtre filters changed: restart the counter
+ *
+ * The mini card reuses the entities of the full card when it has none of its own.
  *
  * Entities are found by themselves (platform swegon_casa + translation key).
  */
 
 const DOMAIN = "swegon_casa";
-const CARD_VERSION = "0.2.3";
+const CARD_VERSION = "0.3.0";
 
 /* ------------------------------------------------------------------------------------------ */
 /*  Entities: card key -> [domain, translation keys by preference]                            */
@@ -44,6 +53,8 @@ const DISCOVERY = {
   preheater_active: ["binary_sensor", ["preheater_active"]],
   heater_power: ["sensor", ["supply_control_power"]],
   heater_setpoint: ["sensor", ["temperature_setpoint_active"]],
+  setpoint: ["number", ["temperature_setpoint"]],
+  // comfort, comfort_active, filter_days, filter_interval, filter_reset: set them with entities: (Home Assistant helpers)
   cooling: ["binary_sensor", ["cooling_active"]],
   defrost: ["binary_sensor", ["defrost"]],
   night_cooling: ["binary_sensor", ["summer_cooling_active"]],
@@ -65,6 +76,13 @@ const DISCOVERY = {
 };
 
 const MODE_KEYS = ["stopped", "away", "home", "boost", "travelling"];
+// Option names of a select / input_select (YAML setups) -> card mode key.
+const MODE_ALIASES = {
+  stop: "stopped", stopped: "stopped", off: "stopped", arret: "stopped", "arrêt": "stopped",
+  away: "away", absent: "away", home: "home", maison: "home", "présent": "home", present: "home",
+  boost: "boost", travelling: "travelling", travel: "travelling", voyage: "travelling",
+};
+const SHARED_KEY = "swegon-casa-card:entities";
 const MODES = {
   stopped: { color: "#7d8794", icon: "mdi:power" },
   away: { color: "#8ea4bd", icon: "mdi:home-export-outline" },
@@ -85,6 +103,9 @@ const T = {
     co2: "CO₂", humidity: "Humidité", voc: "COV", service: "Entretien", inDays: (d) => `dans ${d} j`,
     fireplace: "Cheminée", nightCooling: "Rafraîchissement nocturne", defrost: "Dégivrage", alarm: "Alarme", weekTimer: "Programme horaire",
     rpm: "tr/min", rotor: "Roue", plates: "Échangeur à plaques", left: (m) => `encore ${m} min`, room: "Ambiance", setpoint: "consigne",
+    setpointLbl: "Consigne", applied: (v) => `appliquée ${v}`, comfort: "Confort", comfortOn: "Pilotage confort actif", comfortOff: "Pilotage confort désactivé",
+    reduced: "Vitesse réduite", reasons: { hot: "air soufflé trop chaud", cold: "air soufflé trop froid" },
+    filters: "Filtres", dayUnit: "j", filterLeft: (d) => `${d} j restants`, filterLate: (d) => `en retard de ${d} j`, filterChanged: "Filtres changés", since: (d) => `changés il y a ${d} j`,
     short: { out: "Ext.", supply: "Soufflé", eff: "Rend." },
     notFound: "Aucune centrale Swegon CASA trouvée. Indiquez les entités avec la clé entities:.",
     alarms: {
@@ -106,6 +127,9 @@ const T = {
     co2: "CO₂", humidity: "Humidity", voc: "VOC", service: "Service", inDays: (d) => `in ${d} d`,
     fireplace: "Fireplace", nightCooling: "Night cooling", defrost: "Defrost", alarm: "Alarm", weekTimer: "Week timer",
     rpm: "rpm", rotor: "Rotor", plates: "Plate exchanger", left: (m) => `${m} min left`, room: "Room", setpoint: "setpoint",
+    setpointLbl: "Setpoint", applied: (v) => `applied ${v}`, comfort: "Comfort", comfortOn: "Comfort control on", comfortOff: "Comfort control off",
+    reduced: "Reduced speed", reasons: { hot: "supply air too warm", cold: "supply air too cold" },
+    filters: "Filters", dayUnit: "d", filterLeft: (d) => `${d} d left`, filterLate: (d) => `${d} d overdue`, filterChanged: "Filters changed", since: (d) => `changed ${d} d ago`,
     short: { out: "Out", supply: "Supply", eff: "Eff." },
     notFound: "No Swegon CASA unit found. Set the entities with the entities: key.",
     alarms: {
@@ -166,6 +190,18 @@ const fanBlades = (scale = 1) => {
 
 function esc(v) {
   return String(v ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
+}
+
+function shareEntities(ents) {
+  window.__swegonCasaEntities = ents;
+  try { localStorage.setItem(SHARED_KEY, JSON.stringify(ents)); } catch (e) { /* storage unavailable */ }
+}
+function sharedEntities() {
+  if (window.__swegonCasaEntities) return window.__swegonCasaEntities;
+  try {
+    const v = JSON.parse(localStorage.getItem(SHARED_KEY) || "null");
+    return v && typeof v === "object" && Object.keys(v).length ? v : null;
+  } catch (e) { return null; }
 }
 
 /* ------------------------------------------------------------------------------------------ */
@@ -426,6 +462,17 @@ text{paint-order:stroke;stroke:#16191d;stroke-width:4px;stroke-linejoin:round;fo
 .mb.act{color:var(--mc);background:color-mix(in srgb,var(--mc) 18%,transparent);box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--mc) 40%,transparent)}
 .mb.busy{opacity:.55;pointer-events:none}
 .mb.fire.act{--mc:#ff8a3d}
+.mb.comfort{--mc:#6fd3e8}
+.mb.comfort.red{--mc:#ffcf70}
+.sp{display:flex;align-items:center;gap:2px;padding:4px;border-radius:14px;background:rgba(255,255,255,.035);border:1px solid rgba(255,255,255,.06)}
+.sp .spb{width:36px;height:36px;border:0;border-radius:10px;font:inherit;font-size:20px;font-weight:600;line-height:1;color:#c9d1da;background:transparent;cursor:pointer;transition:background .25s}
+.sp .spb:hover{background:rgba(255,255,255,.08)}
+.sp .spb:disabled{opacity:.35;pointer-events:none}
+.sp .spv{min-width:78px;text-align:center;cursor:pointer;line-height:1.15}
+.sp .spv b{display:block;font-size:17px;font-weight:600;font-variant-numeric:tabular-nums;color:var(--spc,#ffd27a);transition:color .4s}
+.sp .spv i{display:block;font-style:normal;font-size:10.5px;color:#9aa3ad;text-transform:uppercase;letter-spacing:.5px;white-space:nowrap}
+.sp.pending .spv b{opacity:.65}
+.ctl .grp{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
 .alerts{display:flex;flex-wrap:wrap;gap:8px;padding:0 14px 10px}
 .alert{display:flex;align-items:center;gap:10px;font-size:13px;padding:8px 10px 8px 12px;border-radius:12px;flex:1 1 220px;
   background:rgba(255,207,112,.08);border:1px solid rgba(255,207,112,.25);color:#ffcf70}
@@ -443,6 +490,7 @@ text{paint-order:stroke;stroke:#16191d;stroke-width:4px;stroke-linejoin:round;fo
 .tv{font-size:21px;font-weight:600;margin-top:3px;font-variant-numeric:tabular-nums;white-space:nowrap}
 .tv small{font-size:12.5px;font-weight:500;color:#9aa3ad;margin-left:2px}
 .ts{font-size:11.5px;color:#7f8994;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ts.late{color:#ff8a80}
 .bar{height:4px;border-radius:2px;background:rgba(255,255,255,.08);margin-top:6px;overflow:hidden}
 .bar i{display:block;height:100%;width:0;border-radius:2px;background:var(--bc,linear-gradient(90deg,#ff6b3d,#ffd54f,#6fdc8c));transition:width .8s}
 .narrow .tiles{grid-template-columns:repeat(3,1fr);padding:4px 10px 12px}.narrow .tv{font-size:18px}.narrow .tile{padding:8px 10px}
@@ -468,7 +516,9 @@ class SwegonCasaCard extends HTMLElement {
     const first = !this._hass;
     this._hass = hass;
     if (!this.shadowRoot) this._build();
-    if (first || hass.entities !== this._entsRef) { this._map = null; this._entsRef = hass.entities; }
+    // re-resolve when the registry changes, and while nothing is found (shared entities may appear later)
+    const empty = this._map && !Object.values(this._map).some(Boolean);
+    if (first || empty || hass.entities !== this._entsRef) { this._map = null; this._entsRef = hass.entities; }
     this._update();
   }
 
@@ -496,16 +546,27 @@ class SwegonCasaCard extends HTMLElement {
             <span class="badge warn" id="b_filter" data-e="filter"></span>
             <span class="badge warn" id="b_service" data-e="service"></span>
             <span class="badge hot" id="b_fire" data-e="fireplace"></span>
+            <span class="badge warn" id="b_comfort" data-e="comfort_active"></span>
             <span class="badge ice" id="b_night" data-e="night_cooling"></span>
             <span class="badge ice" id="b_defrost" data-e="defrost"></span>
             <span class="pill" id="h_mode" data-e="ventilation"><span class="dot"></span><span id="h_mode_t">—</span></span>
           </div>
         </div>
-        <div class="empty hide" id="empty"></div>
+        <div class="empty" id="empty" style="display:none"></div>
         <div class="wrap" id="diagram">${buildSVG()}</div>
         <div class="ctl" id="ctl">
           <div class="seg" id="seg">${modeBtns}</div>
-          <div class="seg" id="seg2"><button class="mb fire" id="btn_fire"><ha-icon icon="mdi:fireplace"></ha-icon><span>${esc(t.fireplace)}</span></button></div>
+          <div class="grp">
+            <div class="sp" id="sp">
+              <button class="spb" id="sp_dn" aria-label="−">−</button>
+              <div class="spv" data-e="setpoint"><b id="sp_v">—</b><i id="sp_l">${esc(t.setpointLbl)}</i></div>
+              <button class="spb" id="sp_up" aria-label="+">+</button>
+            </div>
+            <div class="seg" id="seg2">
+              <button class="mb comfort" id="btn_comfort"><ha-icon icon="mdi:thermometer-auto"></ha-icon><span>${esc(t.comfort)}</span></button>
+              <button class="mb fire" id="btn_fire"><ha-icon icon="mdi:fireplace"></ha-icon><span>${esc(t.fireplace)}</span></button>
+            </div>
+          </div>
         </div>
         <div class="alerts" id="alerts"></div>
         <div class="tiles" id="tiles">
@@ -516,6 +577,7 @@ class SwegonCasaCard extends HTMLElement {
           <div class="tile" data-e="co2" id="k_co2_w"><div class="tl">${esc(t.co2)}</div><div class="tv" id="k_co2">—</div><div class="bar"><i id="k_co2_b"></i></div></div>
           <div class="tile" data-e="humidity" id="k_hum_w"><div class="tl">${esc(t.humidity)}</div><div class="tv" id="k_hum">—</div><div class="ts" id="k_hum_s"></div></div>
           <div class="tile" data-e="voc" id="k_voc_w"><div class="tl">${esc(t.voc)}</div><div class="tv" id="k_voc">—</div><div class="ts" id="k_voc_s"></div></div>
+          <div class="tile" data-e="filter_days" id="k_flt_w"><div class="tl">${esc(t.filters)}</div><div class="tv" id="k_flt">—</div><div class="ts" id="k_flt_s"></div><div class="bar"><i id="k_flt_b"></i></div></div>
           <div class="tile" data-e="hours_service" id="k_srv_w"><div class="tl">${esc(t.service)}</div><div class="tv" id="k_srv">—</div><div class="ts" id="k_srv_s"></div></div>
         </div>
       </ha-card>`;
@@ -525,6 +587,9 @@ class SwegonCasaCard extends HTMLElement {
       const btn = path.find((n) => n.dataset && (n.dataset.mode || n.dataset.press));
       if (btn) { btn.dataset.mode ? this._setMode(btn.dataset.mode) : this._press(btn.dataset.press); return; }
       if (path.some((n) => n.id === "btn_fire")) { this._toggleFireplace(); return; }
+      if (path.some((n) => n.id === "btn_comfort")) { this._toggle("comfort"); return; }
+      if (path.some((n) => n.id === "sp_up")) { this._stepSetpoint(1); return; }
+      if (path.some((n) => n.id === "sp_dn")) { this._stepSetpoint(-1); return; }
       const el = path.find((n) => n.dataset && n.dataset.e);
       if (!el) return;
       const id = this._eid(el.dataset.e) || (el.dataset.e === "ventilation" ? this._eid("mode") : null);
@@ -556,7 +621,20 @@ class SwegonCasaCard extends HTMLElement {
 
   /* ---------- entity resolution ---------- */
   _resolveAll() {
-    const hass = this._hass, cfg = this._config.entities || {}, map = {};
+    // A card without entities of its own and nothing discovered (YAML setup, e.g. a mini card added from the
+    // card picker) reuses the entities of a full card configured on any dashboard.
+    const own = this._config.entities || {};
+    let map = this._resolveWith(own);
+    if (Object.keys(own).length) shareEntities(own);
+    else if (!Object.values(map).some(Boolean)) {
+      const shared = sharedEntities();
+      if (shared) map = this._resolveWith(shared);
+    }
+    this._map = map;
+  }
+
+  _resolveWith(cfg) {
+    const hass = this._hass, map = {};
     const disc = {};
     let deviceId = this._config.device_id;
     if (hass.entities) {
@@ -579,7 +657,7 @@ class SwegonCasaCard extends HTMLElement {
       else if (d) for (const tk of d[1]) { found = (disc[`${d[0]}:${tk}`] || []).find(exists); if (found) break; }
       map[k] = found || null;
     }
-    this._map = map;
+    return map;
   }
   _eid(k) { if (!this._map) this._resolveAll(); return this._map[k] || null; }
   _st(k) { const id = this._eid(k); return id ? this._hass.states[id] : undefined; }
@@ -615,13 +693,30 @@ class SwegonCasaCard extends HTMLElement {
   }
 
   /* ---------- computed state (shared with the mini card) ---------- */
+  _modeKey(v) {
+    if (v == null) return null;
+    if (MODES[v]) return v;
+    const a = MODE_ALIASES[String(v).toLowerCase()];
+    if (a) return a;
+    return /^\d+$/.test(v) && MODE_KEYS[+v] ? MODE_KEYS[+v] : null;
+  }
+
+  /* options of the mode select / input_select, by card mode key */
+  _modeOptions() {
+    const sel = this._st("mode");
+    const m = {};
+    for (const o of (sel && sel.attributes.options) || []) {
+      const k = this._modeKey(o);
+      if (k && !(k in m)) m[k] = o;
+    }
+    return m;
+  }
+
   _mode() {
-    // Accept the integration's option keys and raw numbers (YAML modbus: 0 = stopped ... 4 = travelling).
+    // Accept the integration's option keys, YAML option names (Home, Away…) and raw numbers (0 = stopped … 4 = travelling).
     for (const k of ["ventilation", "mode"]) {
-      const v = this._s(k);
-      if (v == null) continue;
-      if (MODES[v]) return v;
-      if (/^\d+$/.test(v) && MODE_KEYS[+v]) return MODE_KEYS[+v];
+      const m = this._modeKey(this._s(k));
+      if (m) return m;
     }
     const fan = this._st("fan");
     if (fan) return fan.state === "off" ? "stopped" : MODES[fan.attributes.preset_mode] ? fan.attributes.preset_mode : "home";
@@ -710,6 +805,14 @@ class SwegonCasaCard extends HTMLElement {
     b("b_filter", this._on("filter"), t.filterDue);
     b("b_service", this._on("service"), t.serviceDue);
     b("b_fire", this._on("fireplace"), t.fireplace);
+    const ca = this._st("comfort_active");
+    // reason from the entity, else deduced: supply air warmer than the house -> too warm
+    let reason = ca && ca.attributes ? ca.attributes.reason : null;
+    if (!reason && ca && S.supply != null) {
+      const ref = this._n("extract") != null ? this._n("extract") : this._n("room");
+      if (ref != null) reason = S.supply >= ref ? "hot" : "cold";
+    }
+    b("b_comfort", this._on("comfort_active"), `${t.reduced}${reason && t.reasons[reason] ? ` · ${t.reasons[reason]}` : ""}`);
     b("b_night", this._on("night_cooling"), t.nightCooling);
     b("b_defrost", this._on("defrost"), t.defrost);
   }
@@ -826,19 +929,34 @@ class SwegonCasaCard extends HTMLElement {
   _updateControls(t, S) {
     const hasMode = this._has("mode") || this._has("fan");
     this._show("seg", hasMode);
+    const opts = this._has("mode") ? this._modeOptions() : null;
     this.shadowRoot.querySelectorAll(".mb[data-mode]").forEach((b) => {
+      b.style.display = opts && Object.keys(opts).length && !(b.dataset.mode in opts) ? "none" : "";
       b.classList.toggle("act", b.dataset.mode === S.mode);
       b.classList.toggle("busy", this._busy === "mode");
     });
-    const hasFire = this._has("fireplace");
-    this._show("seg2", hasFire);
+    const hasFire = this._has("fireplace"), hasComfort = this._has("comfort");
+    this._show("seg2", hasFire || hasComfort);
+    this._show("btn_fire", hasFire);
     this._cls("btn_fire", "act", this._on("fireplace"));
     this._cls("btn_fire", "busy", this._busy === "fireplace");
+    this._show("btn_comfort", hasComfort);
+    const comfortOn = this._on("comfort");
+    this._cls("btn_comfort", "act", comfortOn);
+    this._cls("btn_comfort", "red", comfortOn && this._on("comfort_active"));
+    this._cls("btn_comfort", "busy", this._busy === "comfort");
+    const cb = this._$("btn_comfort");
+    if (cb) cb.title = comfortOn ? t.comfortOn : t.comfortOff;
+    this._updateSetpoint(t);
 
     const items = [];
     for (const a of this._alarms()) items.push(`<div class="alert err"><span>${esc(t.alarms[a] || t.alarm)}</span></div>`);
     if (this._on("filter")) {
-      items.push(`<div class="alert"><span>${esc(t.filterDue)}</span>${this._has("confirm_filter") ? `<button data-press="confirm_filter"${this._busy === "confirm_filter" ? " disabled" : ""}><b>${esc(t.confirm)}</b></button>` : ""}</div>`);
+      const rk = this._has("filter_reset") ? "filter_reset" : this._has("confirm_filter") ? "confirm_filter" : null;
+      const lbl = rk === "filter_reset" ? t.filterChanged : t.confirm;
+      const d = this._n("filter_days");
+      const txt = d != null && d < 0 ? `${t.filterDue} · ${t.filterLate(this._f(-d, 0))}` : t.filterDue;
+      items.push(`<div class="alert"><span>${esc(txt)}</span>${rk ? `<button data-press="${rk}"${this._busy === rk ? " disabled" : ""}><b>${esc(lbl)}</b></button>` : ""}</div>`);
     }
     if (this._on("service")) {
       items.push(`<div class="alert"><span>${esc(t.serviceDue)}</span>${this._has("confirm_service") ? `<button data-press="confirm_service"${this._busy === "confirm_service" ? " disabled" : ""}><b>${esc(t.confirm)}</b></button>` : ""}</div>`);
@@ -885,12 +1003,26 @@ class SwegonCasaCard extends HTMLElement {
     const hum = this._n("humidity"), ah = this._n("abs_humidity");
     tile("k_hum", this._has("humidity"));
     this._html("k_hum", hum != null ? `${this._f(hum, 0)}<small>%</small>` : "—");
-    this._txt("k_hum_s", ah != null ? `${this._f(ah, 1)} g/m³` : "");
+    this._txt("k_hum_s", ah != null ? `${this._f(ah, 1)} ${this._unit("abs_humidity") || "g/m³"}` : "");
 
     const voc = this._n("voc");
     tile("k_voc", this._has("voc"));
     this._html("k_voc", voc != null ? `${this._f(voc, 0)}<small>ppm</small>` : "—");
     this._txt("k_voc_s", "");
+
+    const fd = this._n("filter_days");
+    tile("k_flt", this._has("filter_days"));
+    const fst = this._st("filter_days");
+    const interval = (fst && parseFloat(fst.attributes.interval_days)) || this._n("filter_interval");
+    this._html("k_flt", fd == null ? "—" : `${this._f(Math.abs(fd), 0)}<small>${t.dayUnit}</small>`);
+    this._txt("k_flt_s", fd == null ? "" : fd < 0 ? t.filterLate(this._f(-fd, 0)) : interval > 0 ? t.since(this._f(Math.max(0, interval - fd), 0)) : t.filterLeft(this._f(fd, 0)));
+    this._cls("k_flt_s", "late", fd != null && fd < 0);
+    const fb = this._$("k_flt_b");
+    if (fb) {
+      const ratio = fd == null ? 0 : interval > 0 ? clamp(fd / interval, 0, 1) : fd > 30 ? 1 : clamp(fd / 30, 0, 1);
+      fb.style.width = `${fd == null ? 0 : Math.max(4, ratio * 100)}%`;
+      fb.style.setProperty("--bc", fd == null ? "#4a525d" : fd <= 0 ? "#ff6e64" : ratio < 0.15 ? "#ffcf70" : "#6fdc8c");
+    }
 
     const h = this._n("hours_service");
     tile("k_srv", this._has("hours_service"));
@@ -909,8 +1041,10 @@ class SwegonCasaCard extends HTMLElement {
 
   _setMode(mode) {
     const sel = this._st("mode");
-    if (sel && (sel.attributes.options || []).includes(mode)) {
-      this._run("mode", () => this._hass.callService("select", "select_option", { entity_id: sel.entity_id, option: mode }));
+    const opt = sel ? this._modeOptions()[mode] : null;
+    if (opt != null) {
+      const dom = sel.entity_id.split(".")[0]; // select or input_select
+      this._run("mode", () => this._hass.callService(dom, "select_option", { entity_id: sel.entity_id, option: opt }));
       return;
     }
     const fan = this._eid("fan");
@@ -920,14 +1054,75 @@ class SwegonCasaCard extends HTMLElement {
       : this._hass.callService("fan", "set_preset_mode", { entity_id: fan, preset_mode: mode === "travelling" ? "travelling" : mode })));
   }
 
-  _toggleFireplace() {
-    const id = this._eid("fireplace");
-    if (id) this._run("fireplace", () => this._hass.callService("switch", this._on("fireplace") ? "turn_off" : "turn_on", { entity_id: id }));
+  _toggleFireplace() { this._toggle("fireplace"); }
+
+  // switch or input_boolean
+  _toggle(key) {
+    const id = this._eid(key);
+    if (id) this._run(key, () => this._hass.callService("homeassistant", this._on(key) ? "turn_off" : "turn_on", { entity_id: id }));
   }
 
+  // button or input_button
   _press(key) {
     const id = this._eid(key);
-    if (id) this._run(key, () => this._hass.callService("button", "press", { entity_id: id }));
+    if (!id) return;
+    const dom = id.split(".")[0] === "input_button" ? "input_button" : "button";
+    this._run(key, () => this._hass.callService(dom, "press", { entity_id: id }));
+  }
+
+  /* ---------- temperature setpoint (number or input_number) ---------- */
+  _spRange() {
+    const st = this._st("setpoint");
+    const a = (st && st.attributes) || {};
+    const num = (v, d) => { const n = parseFloat(v); return isNaN(n) ? d : n; };
+    return { min: num(a.min, 13), max: num(a.max, 25), step: num(a.step, 0.5) || 0.5 };
+  }
+
+  _updateSetpoint(t) {
+    const has = this._has("setpoint");
+    this._show("sp", has);
+    if (!has) return;
+    const { min, max, step } = this._spRange();
+    const cur = this._spShown();
+    const d = step < 1 ? 1 : 0;
+    this._txt("sp_v", cur != null ? `${this._f(cur, d)} °C` : "—");
+    this._var("sp", "--spc", airColor(cur));
+    this._cls("sp", "pending", this._pendingSp != null);
+    const up = this._$("sp_up"), dn = this._$("sp_dn");
+    if (up) up.disabled = cur == null || cur + step > max + 1e-6;
+    if (dn) dn.disabled = cur == null || cur - step < min - 1e-6;
+    // the unit may apply another value (away / travelling drop): show it when it differs
+    const act = this._n("heater_setpoint");
+    this._txt("sp_l", act != null && cur != null && Math.abs(act - cur) >= 0.5 ? t.applied(`${this._f(act, d)} °`) : t.setpointLbl);
+  }
+
+  // value being typed, else the value just sent until the entity reports it (max 5 s), else the entity state
+  _spShown() {
+    if (this._pendingSp != null) return this._pendingSp;
+    const v = this._n("setpoint"), sent = this._spSent;
+    if (sent && Date.now() - sent.at < 5000 && (v == null || Math.abs(v - sent.value) > 1e-6)) return sent.value;
+    this._spSent = null;
+    return v;
+  }
+
+  _stepSetpoint(dir) {
+    const id = this._eid("setpoint");
+    if (!id) return;
+    const { min, max, step } = this._spRange();
+    const base = this._spShown();
+    if (base == null) return;
+    this._pendingSp = clamp(Math.round((base + dir * step) / step) * step, min, max);
+    this._update();
+    // several taps in a row are sent as one write
+    clearTimeout(this._spTimer);
+    this._spTimer = setTimeout(() => {
+      const value = this._pendingSp;
+      const dom = id.split(".")[0] === "input_number" ? "input_number" : "number";
+      this._run("setpoint", async () => {
+        this._spSent = { value, at: Date.now() };
+        try { await this._hass.callService(dom, "set_value", { entity_id: id, value }); } finally { this._pendingSp = null; }
+      });
+    }, 900);
   }
 }
 
@@ -936,7 +1131,11 @@ class SwegonCasaCard extends HTMLElement {
 /* ------------------------------------------------------------------------------------------ */
 const MINI_CSS = `
 .mwrap{container-type:inline-size}
-.mini{display:grid;grid-template-columns:minmax(110px,150px) 1fr;gap:6px 14px;align-items:center;padding:12px 14px 12px 10px}
+.mini{display:grid;grid-template-columns:minmax(130px,190px) 1fr;gap:6px 14px;align-items:center;padding:12px 14px 12px 10px}
+.mini .mt{font-size:19px;font-weight:600;stroke-width:4px}
+.mnote{font-size:11.5px;margin-top:6px;color:#ffcf70;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.mnote:empty{display:none}
+.mempty{padding:14px 16px;color:#9aa3ad;font-size:13px}
 .mini svg{width:100%;height:auto;display:block}
 .mini .duct .pb{stroke-width:11}.mini .duct .pg{stroke-width:13}.mini .duct .pc{stroke-width:6}
 .mini .duct .pf{stroke-width:1.8;stroke-dasharray:1.5 9}.mini .duct.on .pf{animation-name:flowm}
@@ -953,21 +1152,24 @@ const MINI_CSS = `
 .ms .v small{font-size:11px;color:#9aa3ad;font-weight:500;margin-left:1px}
 .ms.hide{display:none}
 .mclick{cursor:pointer}
-@container (max-width:400px){.mini{grid-template-columns:92px 1fr;gap:4px 10px;padding:10px 12px 10px 8px}.mname{display:none}
+@container (max-width:400px){.mini{grid-template-columns:92px 1fr;gap:4px 10px;padding:10px 12px 10px 8px}.mname{display:none}.mini .mt{display:none}
   .mtop{justify-content:flex-start}.ms .v{font-size:15px}.mstats{grid-template-columns:repeat(auto-fit,minmax(42px,1fr));gap:3px 6px}}
 @container (max-width:260px){.mini{grid-template-columns:1fr}.mini svg{max-width:160px;margin:0 auto}}
 `;
 
 function buildMiniSVG() {
-  const hx = exchanger({ cx: 100, cy: 61, hs: 26 });
+  const hx = exchanger({ cx: 100, cy: 66, hs: 26 });
+  const mt = (id, x, y, a) => `<text id="${id}" class="mt" x="${x}" y="${y}" text-anchor="${a}"></text>`;
   return `
-<svg viewBox="0 0 200 122" xmlns="http://www.w3.org/2000/svg">
+<svg viewBox="0 0 200 140" xmlns="http://www.w3.org/2000/svg">
   <defs>${hx.defs}</defs>
-  ${pipe("mp_fresh", "M4 22 H58 L82 42", "duct")}
-  ${pipe("mp_ext", "M196 22 H142 L118 42", "duct")}
-  ${pipe("mp_exh", "M82 80 L58 100 H4", "duct")}
-  ${pipe("mp_sup", "M118 80 L142 100 H196", "duct")}
+  ${pipe("mp_fresh", "M4 27 H58 L82 47", "duct")}
+  ${pipe("mp_ext", "M196 27 H142 L118 47", "duct")}
+  ${pipe("mp_exh", "M82 85 L58 105 H4", "duct")}
+  ${pipe("mp_sup", "M118 85 L142 105 H196", "duct")}
   <g id="hx" class="mclick" data-e="efficiency">${hx.plates}${hx.ducts}</g>
+  ${mt("mt_fresh", 4, 16, "start")}${mt("mt_ext", 196, 16, "end")}
+  ${mt("mt_exh", 4, 132, "start")}${mt("mt_sup", 196, 132, "end")}
 </svg>`;
 }
 
@@ -981,7 +1183,8 @@ class SwegonCasaMiniCard extends SwegonCasaCard {
     root.innerHTML = `
       <style>${CSS}${MINI_CSS}</style>
       <ha-card class="mwrap">
-        <div class="mini">
+        <div class="mempty" id="m_empty" style="display:none">${esc(t.notFound)}</div>
+        <div class="mini" id="m_body">
           <div class="mclick" id="msvg">${buildMiniSVG()}</div>
           <div style="min-width:0">
             <div class="mtop">
@@ -994,6 +1197,7 @@ class SwegonCasaMiniCard extends SwegonCasaCard {
               <div class="ms" data-e="efficiency"><div class="l">${esc(t.short.eff)}</div><div class="v" id="m_eff">—</div></div>
               <div class="ms" data-e="co2" id="m_co2_w"><div class="l">${esc(t.co2)}</div><div class="v" id="m_co2">—</div></div>
             </div>
+            <div class="mnote" id="m_note"></div>
           </div>
         </div>
       </ha-card>`;
@@ -1017,6 +1221,10 @@ class SwegonCasaMiniCard extends SwegonCasaCard {
     if (!this._hass || !this.shadowRoot) return;
     if (!this._map) this._resolveAll();
     const t = this._t();
+    const found = Object.values(this._map).some(Boolean);
+    this._show("m_empty", !found);
+    this._show("m_body", found);
+    if (!found) return;
     const S = this._computeState();
     this._txt("m_name", this._config.title || this._deviceName());
     this._updateHeader(t, S);
@@ -1038,6 +1246,16 @@ class SwegonCasaMiniCard extends SwegonCasaCard {
     const co2 = this._n("co2");
     this._html("m_co2", co2 != null ? `${this._f(co2, 0)}<small>ppm</small>` : "—");
     this._cls("m_co2_w", "hide", !this._has("co2"));
+
+    // temperatures at the four duct ends
+    const mt = (id, v, c) => { const el = this._$(id); if (!el) return; el.textContent = v == null ? "" : `${this._f(v, 1)}°`; el.style.fill = c; };
+    mt("mt_fresh", S.fresh, cFresh); mt("mt_ext", S.extract, cExt); mt("mt_exh", S.exhaust, cExh); mt("mt_sup", S.supply, cSup);
+
+    const notes = [];
+    if (this._alarms().length) notes.push(t.alarm);
+    if (this._on("comfort_active")) notes.push(t.reduced);
+    if (this._on("filter")) notes.push(t.filterDue);
+    this._txt("m_note", notes.join(" · "));
   }
 }
 
@@ -1056,7 +1274,7 @@ if (!window.customCards.find((c) => c.type === "swegon-casa-mini-card")) {
   window.customCards.push({
     type: "swegon-casa-mini-card",
     name: "Swegon CASA — Mini",
-    description: "Version compacte : mode, températures, rendement et CO₂.",
+    description: "Version compacte : mode, températures, rendement et CO₂. Reprend les entités de la grande carte.",
     preview: true,
   });
 }
